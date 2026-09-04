@@ -181,7 +181,7 @@ main branch → origin https://github.com/owendswang/ps5-web-file-manager.git
 
 **v1.8 需求范围（用户已确认）**：
 - ✅ RAR 单卷（明文）
-- ✅ RAR 分卷（RAR5 `name.partNN.rar` + 旧式 `name.rar + .rNN`）
+- ✅ RAR 分卷（仅 RAR5 `name.partNN.rar` 新格式）
 - ✅ 加密 RAR（密码弹窗）
 - ❌ ZIP 分卷（用户说"不需要"）
 - ❌ 7z / tar / 其他格式
@@ -647,17 +647,15 @@ function isExtractableArchive(item) {
   if (item.type !== "-") return false;
   // ZIP（已有）
   if (/\.zipx?$/i.test(item.name)) return true;
-  // RAR 主卷（单卷或分卷首卷）
-  if (/\.(?:part0*\d+)?\.rar$/i.test(item.name)) return true;
-  // 裸 .rar（单卷，旧式主卷）
+  // RAR 单卷 .rar
   if (/\.rar$/i.test(item.name)) return true;
+  // RAR5 分卷主卷 .part01.rar / .part1.rar / .part001.rar
+  if (/\.part0*1\.rar$/i.test(item.name)) return true;
   return false;
 }
 
 function isRarSubVolume(item) {
   if (item.type !== "-") return false;
-  // RAR 旧式子卷 .r00, .r01 ...
-  if (/\.r\d{2,}$/i.test(item.name)) return true;
   // RAR5 子卷 .part02.rar, .part2.rar ...（part01 才是主卷）
   if (/\.part0*\d+\.rar$/i.test(item.name) &&
       !/\.part0*1\.rar$/i.test(item.name)) return true;
@@ -844,7 +842,6 @@ node --check assets/lang-zh.js
 #    - 选 .zip → 不弹密码框（保持 v1.7 行为）
 #    - 选 .part02.rar → 解压按钮置灰 + tooltip
 #    - 选 .part01.rar → 解压按钮可用
-#    - 选 .r00 → 解压按钮置灰 + tooltip
 
 # 3. 提交后端确认 password 字段透传：
 #    Network → /api/extract → Form Data → password: "xxx"
@@ -874,9 +871,6 @@ rar a -ma rar5_single.rar sample.txt
 # RAR5 分卷（5 卷 × 1MB）
 mkdir -p split_src && head -c 5M /dev/urandom > split_src/big.bin
 rar a -v1m -ma rar5_multi.part01.rar split_src/
-
-# RAR4 分卷（旧式 .rNN 格式）
-rar a -v1m rar4_multi_old.rar split_src/
 
 # 加密 RAR5（密码 "secret"）
 rar a -ma -hpsecret encrypted_rar5.rar sample.txt
@@ -963,14 +957,6 @@ test_rar5_multi_volume(void) {
                             ZIPX_CONFLICT_FAIL, NULL, NULL, NULL, NULL);
   check(r.status == ZIPX_OK, "RAR5 multi-volume extracts OK");
   check(r.entries_total >= 1, "at least one entry");
-}
-
-static void
-test_rar4_multi_volume_old(void) {
-  /* 旧式 .rNN 格式 */
-  rarx_result_t r = run_rar("rar4_multi.rar", "out_rar4_multi_old",
-                            ZIPX_CONFLICT_FAIL, NULL, NULL, NULL, NULL);
-  check(r.status == ZIPX_OK, "RAR4 .rNN multi-volume extracts OK");
 }
 
 static void
@@ -1100,7 +1086,7 @@ python3 .build/check-elf-gzip.py ./web-file-mgr.elf | grep -E "(✓|✗)"
 
 ### Added
 - **RAR archive extraction** via vendored alexbatalov/unrar.c
-- RAR4 and RAR5 single-volume and multi-volume (`.partNN.rar` + `.rNN` legacy)
+- RAR4 and RAR5 single-volume and multi-volume (`name.partNN.rar`)
 - Encrypted RAR support with password prompt + retry dialog
 - Frontend detection of RAR main/sub volumes + grayscale sub-volume button
 
@@ -1115,9 +1101,9 @@ python3 .build/check-elf-gzip.py ./web-file-mgr.elf | grep -E "(✓|✗)"
 ### RAR extraction
 
 The project also extracts RAR4 and RAR5 archives, including
-multi-volume (`name.part01.rar`, `name.part02.rar`, …) and the
-legacy `.rNN` format. Encrypted archives prompt for a password
-client-side; the password is held only in memory and never saved.
+multi-volume (`name.part01.rar`, `name.part02.rar`, …). Encrypted
+archives prompt for a password client-side; the password is held
+only in memory and never saved.
 
 Limits mirror the ZIP profiles (200K entries / 512 GiB / 64 GiB /
 ratio 200 by default, with the same `large=1` opt-in to 500K /
@@ -1269,7 +1255,6 @@ memset(task->extract_password, 0, sizeof(task->extract_password));
 ### 8.4 为什么不在后端做分卷发现
 
 - unrar 内部已经处理 `name.part01.rar` → 找 `.part02, .part03...`
-- 也处理 `name.rar` → 找 `name.r00, .r01...`
 - 后端写发现逻辑只是重复实现，且容易有边角 case bug
 
 ### 8.5 为什么密码不做错/对细粒度区分
@@ -1464,7 +1449,7 @@ size --target=binary web-file-mgr.elf
 | 类别 | 用例 | 期望 |
 |---|---|---|
 | 基础 | rar4_single / rar5_single | OK |
-| 分卷 | rar5_multi / rar4_multi_old | OK |
+| 分卷 | rar5_multi | OK |
 | 加密 | rar4_enc_correct_pwd / rar5_enc_correct_pwd | OK |
 | 加密 | rar4_enc_wrong_pwd / rar4_enc_no_pwd | ERR_PASSWORD |
 | 错误 | rar_truncated / rar_bad_archive | ERR_FORMAT |
