@@ -1,0 +1,1360 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PS5 Web File Manager — ZIP 解压功能演示</title>
+<style>
+  :root {
+    --bg: #111316;
+    --bg-elev: #1a1e22;
+    --bg-elev2: #232930;
+    --border: #2c333b;
+    --text: #edf0f2;
+    --text-dim: #aab4be;
+    --text-faint: #6b7780;
+    --accent: #6ed5c8;          /* extract 青绿 */
+    --accent-bg: #17302e;
+    --accent-border: #2a6b66;
+    --accent-hover: #1d3f3c;
+    --warn: #f8dfae;
+    --warn-bg: #352b1c;
+    --warn-border: #8c6425;
+    --danger: #f29b9b;
+    --danger-bg: #3a2424;
+    --success: #aae59d;
+    --success-bg: #1f3322;
+    --link: #79b8ff;
+    --shadow: 0 8px 24px rgba(0,0,0,.45);
+    --radius: 6px;
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", "PingFang SC", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+  body { line-height: 1.55; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+
+  h1 { margin: 0 0 6px; font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+  .subtitle { color: var(--text-dim); margin: 0 0 28px; font-size: 14px; }
+
+  /* Hero 说明 */
+  .hero {
+    background: linear-gradient(135deg, #1a2326 0%, #1a1e22 100%);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 26px;
+    margin-bottom: 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -40px; right: -40px;
+    width: 220px; height: 220px;
+    background: radial-gradient(circle, rgba(110,213,200,.18) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero h2 { margin: 0 0 14px; font-size: 16px; color: var(--accent); font-weight: 500; letter-spacing: .04em; text-transform: uppercase; }
+  .hero-flow { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
+  .hero-step {
+    background: rgba(0,0,0,.25);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .hero-step .num {
+    display: inline-block;
+    width: 22px; height: 22px; line-height: 22px;
+    border-radius: 50%;
+    background: var(--accent-bg);
+    color: var(--accent);
+    font-size: 12px; font-weight: 600;
+    text-align: center;
+    margin-right: 8px;
+  }
+  .hero-step h3 { margin: 0 0 6px; font-size: 14px; font-weight: 500; }
+  .hero-step p { margin: 0; font-size: 13px; color: var(--text-dim); }
+
+  /* Tab 切换 */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+  .tab {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    padding: 10px 18px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    font-size: 14px;
+    font-family: inherit;
+    transition: color .15s, border-color .15s;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; background: var(--bg-elev2); color: var(--text-dim); font-size: 11px; margin-left: 6px; }
+
+  /* 演示区主框架 — 模拟 PS5 WFM 界面 */
+  .demo { display: none; }
+  .demo.active { display: block; }
+
+  .stage-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 22px;
+  }
+  .stage-grid.single { grid-template-columns: 1fr; }
+  .panel {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .panel-head {
+    padding: 12px 16px;
+    background: var(--bg-elev2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .panel-head .title {
+    font-weight: 500;
+    color: var(--text);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel-head .title::before {
+    content: ''; width: 8px; height: 8px;
+    background: var(--accent); border-radius: 50%;
+    box-shadow: 0 0 8px rgba(110,213,200,.6);
+  }
+  .panel-head .meta { color: var(--text-faint); font-size: 12px; }
+  .panel-body { padding: 14px; }
+
+  /* 文件列表 / tree */
+  .filerow {
+    display: grid;
+    grid-template-columns: 22px 1fr 80px 70px;
+    gap: 10px;
+    padding: 7px 12px;
+    align-items: center;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    border: 1px solid transparent;
+    margin-bottom: 1px;
+  }
+  .filerow:hover { background: rgba(255,255,255,.03); }
+  .filerow.selected {
+    background: rgba(110,213,200,.10);
+    border-color: var(--accent-border);
+  }
+  .filerow .icon { font-size: 15px; line-height: 1; }
+  .filerow .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .filerow .size, .filerow .mtime { color: var(--text-faint); font-size: 11px; text-align: right; }
+  .filerow.zip .name { color: var(--accent); }
+  .filerow.zip .name::after {
+    content: 'ZIP';
+    margin-left: 8px;
+    font-size: 10px;
+    background: var(--accent-bg);
+    color: var(--accent);
+    padding: 1px 5px;
+    border-radius: 3px;
+    vertical-align: middle;
+  }
+
+  /* 工具栏（模拟） */
+  .toolbar {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    padding: 10px 14px;
+    background: var(--bg-elev2);
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+  }
+  .tbtn {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    transition: background .15s, border-color .15s;
+  }
+  .tbtn:hover:not(:disabled) { background: rgba(255,255,255,.05); color: var(--text); }
+  .tbtn:disabled { opacity: .35; cursor: not-allowed; }
+  .tbtn.extract {
+    background: var(--accent-bg);
+    border-color: var(--accent-border);
+    color: var(--accent);
+  }
+  .tbtn.extract:hover:not(:disabled) { background: var(--accent-hover); }
+  .tbtn.warn {
+    background: var(--warn-bg);
+    border-color: var(--warn-border);
+    color: var(--warn);
+  }
+  .tbtn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #0a1e1c;
+    font-weight: 500;
+  }
+  .tbtn-primary:hover:not(:disabled) { background: #84dccf; }
+
+  /* Path bar */
+  .pathbar {
+    padding: 8px 14px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-dim);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  /* Modal */
+  .modal-mask {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.6);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(2px);
+  }
+  .modal-mask.open { display: flex; animation: fadein .2s; }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  .modal {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    width: 520px;
+    max-width: calc(100vw - 32px);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    animation: rise .22s;
+  }
+  @keyframes rise { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .modal h3 { margin: 0; padding: 16px 20px; font-size: 16px; border-bottom: 1px solid var(--border); background: var(--bg-elev2); }
+  .modal .body { padding: 18px 20px; }
+  .modal .foot {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    display: flex; justify-content: flex-end; gap: 8px;
+    background: rgba(0,0,0,.15);
+  }
+
+  /* 冲突策略 */
+  .strategy {
+    display: flex; flex-direction: column; gap: 10px; margin: 10px 0 6px;
+  }
+  .strategy label {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    cursor: pointer;
+    background: rgba(0,0,0,.2);
+    transition: border-color .15s, background .15s;
+  }
+  .strategy label:hover { border-color: var(--accent-border); background: rgba(110,213,200,.06); }
+  .strategy input[type="radio"] { margin-top: 3px; accent-color: var(--accent); }
+  .strategy .stitle { font-size: 14px; margin-bottom: 2px; color: var(--text); }
+  .strategy .sdesc { font-size: 12px; color: var(--text-dim); }
+  .strategy .default-pill {
+    display: inline-block; margin-left: 8px;
+    padding: 1px 6px; font-size: 10px;
+    background: var(--accent-bg); color: var(--accent);
+    border-radius: 3px; vertical-align: middle;
+  }
+
+  /* 进度条 */
+  .progress-area {
+    padding: 14px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-elev2);
+    display: none;
+  }
+  .progress-area.active { display: block; }
+  .progress-head {
+    display: flex; justify-content: space-between;
+    font-size: 12px; color: var(--text-dim); margin-bottom: 6px;
+  }
+  .progress-head .pct { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .progress-bar {
+    height: 6px;
+    background: rgba(0,0,0,.4);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent) 0%, #84dccf 100%);
+    width: 0%;
+    transition: width .25s ease-out;
+    box-shadow: 0 0 8px rgba(110,213,200,.4);
+  }
+  .progress-stat { display: flex; gap: 16px; margin-top: 8px; font-size: 11px; color: var(--text-faint); font-family: ui-monospace, monospace; }
+  .progress-stat .v { color: var(--text-dim); }
+
+  /* 结果区 */
+  .result { display: none; }
+  .result.active { display: block; }
+  .result-banner {
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    margin-bottom: 14px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px;
+  }
+  .result-banner.success {
+    background: var(--success-bg);
+    border: 1px solid #2d5232;
+    color: var(--success);
+  }
+  .result-banner.warn {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    color: var(--warn);
+  }
+  .result-banner.error {
+    background: var(--danger-bg);
+    border: 1px solid #5c2c2c;
+    color: var(--danger);
+  }
+  .result-banner .check { font-size: 18px; }
+
+  /* Diff tree */
+  .diff-tree {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    max-height: 280px;
+    overflow: auto;
+  }
+  .diff-line { padding: 2px 6px; border-radius: 3px; display: flex; gap: 10px; align-items: center; }
+  .diff-line.new {
+    background: rgba(110,213,200,.08);
+    color: var(--accent);
+  }
+  .diff-line.overwrote {
+    background: rgba(248,223,174,.10);
+    color: var(--warn);
+  }
+  .diff-line.conflict {
+    background: rgba(242,155,155,.12);
+    color: var(--danger);
+    text-decoration: line-through;
+  }
+  .diff-line .marker {
+    display: inline-block;
+    width: 14px;
+    font-weight: 600;
+    font-family: inherit;
+  }
+  .diff-line .name { flex: 1; }
+  .diff-line .badge-new {
+    font-size: 10px; padding: 1px 5px; border-radius: 2px;
+    background: var(--accent-bg);
+    margin-left: 6px;
+  }
+  .diff-line .badge-repl {
+    font-size: 10px; padding: 1px 5px; border-radius: 2px;
+    background: var(--warn-bg);
+    margin-left: 6px;
+  }
+
+  /* 上传 dropzone */
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 32px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    background: rgba(0,0,0,.2);
+  }
+  .dropzone:hover, .dropzone.dragover {
+    border-color: var(--accent);
+    background: rgba(110,213,200,.04);
+  }
+  .dropzone .ic { font-size: 36px; line-height: 1; margin-bottom: 8px; color: var(--text-faint); }
+  .dropzone.has-file .ic { color: var(--accent); }
+  .dropzone .main { font-size: 14px; color: var(--text); margin-bottom: 4px; }
+  .dropzone .hint { font-size: 12px; color: var(--text-faint); }
+
+  /* 场景 3 — 策略对比表 */
+  .policy-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .policy-table th, .policy-table td {
+    padding: 14px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    vertical-align: top;
+  }
+  .policy-table th {
+    background: var(--bg-elev2);
+    font-weight: 500;
+    color: var(--text-dim);
+    font-size: 12px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  .policy-table tr:last-child td { border-bottom: none; }
+  .policy-table td.scenario { font-weight: 500; width: 220px; color: var(--text); }
+  .policy-table .verdict-ok { color: var(--success); }
+  .policy-table .verdict-bad { color: var(--danger); }
+  .policy-table .verdict-mid { color: var(--warn); }
+  .policy-table code {
+    background: var(--bg);
+    padding: 1px 6px; border-radius: 3px; font-size: 12px;
+    color: var(--text); border: 1px solid var(--border);
+  }
+
+  /* Risk / 安全限制 */
+  .risks {
+    display: grid; grid-template-columns: repeat(2,1fr);
+    gap: 12px; margin-top: 8px;
+  }
+  .risk {
+    padding: 10px 14px;
+    border-left: 3px solid var(--accent-border);
+    background: rgba(0,0,0,.2);
+    border-radius: 0 4px 4px 0;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .risk strong { color: var(--text); display: block; margin-bottom: 2px; }
+  .risk.danger { border-left-color: var(--danger); }
+
+  /* Footer */
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--text-faint); font-size: 12px;
+    text-align: center;
+  }
+  footer code {
+    background: var(--bg-elev);
+    padding: 1px 6px; border-radius: 3px;
+    color: var(--text-dim);
+  }
+
+  /* 控制条 */
+  .controls {
+    display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;
+  }
+  .controls .spacer { flex: 1; }
+  .controls .meta { color: var(--text-faint); font-size: 12px; }
+
+  @media (max-width: 880px) {
+    .stage-grid { grid-template-columns: 1fr; }
+    .hero-flow { grid-template-columns: 1fr; }
+    .risks { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>ZIP 解压功能演示</h1>
+  <p class="subtitle">PS5 Web File Manager · 首版仅支持未加密、未分卷普通 ZIP（stored / deflate / ZIP64），拒绝符号链接/设备文件/FIFO。</p>
+
+  <!-- ============ Hero 概述 ============ -->
+  <section class="hero">
+    <h2>两种入口 · 一种安全策略</h2>
+    <div class="hero-flow">
+      <div class="hero-step">
+        <h3><span class="num">1</span>解压到当前目录</h3>
+        <p>选中已存在的 <code style="color:var(--accent)">.zip</code> → 工具栏出现青绿 <code>解压</code> 按钮 → 选冲突策略 → 进度条走完</p>
+      </div>
+      <div class="hero-step">
+        <h3><span class="num">2</span>上传并解压</h3>
+        <p>从浏览器拖入 <code>.zip</code> → 上传完成弹出"解压到当前目录？" → 可选<strong>解压后删除源</strong></p>
+      </div>
+      <div class="hero-step">
+        <h3><span class="num">3</span>三种冲突策略</h3>
+        <p><code style="color:var(--accent)">fail</code>(默认·安全) / <code style="color:var(--warn)">overwrite</code>(覆盖) / <code style="color:var(--link)">merge</code>(合并目录)</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Tabs ============ -->
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="s1">场景 1 · 解压到当前目录<span class="badge">演示</span></button>
+    <button class="tab" data-tab="s2">场景 2 · 上传并解压<span class="badge">演示</span></button>
+    <button class="tab" data-tab="s3">场景 3 · 冲突策略对比<span class="badge">查表</span></button>
+  </nav>
+
+  <!-- =========================================================== -->
+  <!-- 场景 1: 解压到当前目录 -->
+  <!-- =========================================================== -->
+  <div class="demo active" id="s1">
+
+    <div class="controls">
+      <span class="meta" id="s1-meta">目标目录：<code>/data/saves/BOTW</code></span>
+      <span class="spacer"></span>
+      <button class="tbtn" id="s1-reset">重置</button>
+      <button class="tbtn" id="s1-shuffle">换一批文件</button>
+    </div>
+
+    <div class="stage-grid">
+      <!-- 左：源目录 + ZIP 内预览 -->
+      <div class="panel" id="s1-left">
+        <div class="toolbar">
+          <button class="tbtn" disabled>复制</button>
+          <button class="tbtn" disabled>重命名</button>
+          <button class="tbtn" disabled>删除</button>
+          <button class="tbtn extract" id="s1-extract-btn" disabled>解压到当前目录</button>
+          <button class="tbtn tbtn-primary" id="s1-extract-btn-2" disabled style="margin-left:auto">▶ 解压</button>
+        </div>
+        <div class="pathbar">📁 <span id="s1-curpath">/data/saves/BOTW</span></div>
+        <div class="panel-body" id="s1-filelist"></div>
+        <div class="progress-area" id="s1-progress">
+          <div class="progress-head">
+            <span id="s1-ps-name">scanning archive</span>
+            <span class="pct" id="s1-ps-pct">0%</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" id="s1-ps-fill"></div></div>
+          <div class="progress-stat">
+            <span>entries: <span class="v" id="s1-ps-entries">0 / 0</span></span>
+            <span>total: <span class="v" id="s1-ps-total">0 B</span></span>
+            <span>speed: <span class="v" id="s1-ps-speed">—</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右：ZIP 内容预览（点 ZIP 后填充）-->
+      <div class="panel" id="s1-zip-panel">
+        <div class="panel-head">
+          <div class="title">ZIP 内容预览</div>
+          <div class="meta" id="s1-zip-meta">点击左侧 .zip 文件查看</div>
+        </div>
+        <div class="panel-body" id="s1-zip-preview" style="font-family:ui-monospace,monospace;font-size:12px;color:var(--text-dim);">
+          <div style="text-align:center;padding:36px 0;color:var(--text-faint);">
+            ← 在左侧选中任意 <span style="color:var(--accent)">.zip</span> 文件<br/>
+            此处将显示压缩包内的全部条目
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 结果 -->
+    <div class="result" id="s1-result"></div>
+  </div>
+
+  <!-- =========================================================== -->
+  <!-- 场景 2: 上传并解压 -->
+  <!-- =========================================================== -->
+  <div class="demo" id="s2">
+    <div class="controls">
+      <span class="meta">目标目录：<code>/data/games</code></span>
+      <span class="spacer"></span>
+      <button class="tbtn" id="s2-reset">重置</button>
+    </div>
+
+    <div class="stage-grid single">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="title">上传 ZIP</div>
+          <div class="meta">drag-drop 或点击选择</div>
+        </div>
+        <div class="panel-body">
+          <div class="dropzone" id="s2-drop">
+            <div class="ic">📦</div>
+            <div class="main">把 .zip 拖到此处，或<span style="color:var(--accent);text-decoration:underline;cursor:pointer">点击选择</span></div>
+            <div class="hint">仅支持 .zip，未加密、未分卷，最大 <code>8 GiB</code></div>
+            <input type="file" id="s2-file" accept=".zip" style="display:none">
+          </div>
+
+          <!-- 上传进度 -->
+          <div class="progress-area" id="s2-upload" style="margin:14px 0 0;border-radius:6px;">
+            <div class="progress-head">
+              <span>上传中…</span>
+              <span class="pct" id="s2-up-pct">0%</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" id="s2-up-fill"></div></div>
+            <div class="progress-stat">
+              <span><span class="v" id="s2-up-name">my-save.zip</span></span>
+              <span><span class="v" id="s2-up-size">— / —</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 弹窗二选一 -->
+    <div class="modal-mask" id="s2-modal">
+      <div class="modal">
+        <h3>📦 上传完成 — 是否解压？</h3>
+        <div class="body">
+          <p style="margin:0 0 14px;font-size:14px;">文件 <code style="color:var(--accent)">my-save.zip</code> 已上传到 <code>/data/games/</code>。</p>
+          <p style="margin:0 0 14px;font-size:14px;color:var(--text-dim);">接下来你可以直接解压它。</p>
+          <div class="risks">
+            <div class="risk"><strong>解压前</strong>ZIP 内容已先扫描 CRC + 文件大小，确认<strong>不是分卷/加密/SPD</strong>才进解压。</div>
+            <div class="risk"><strong>解压时</strong>不存在的父目录会自动创建，已存在的普通文件按你选的冲突策略处理。</div>
+          </div>
+          <div class="strategy" style="margin-top:18px;">
+            <label>
+              <input type="checkbox" id="s2-remove-source">
+              <div>
+                <div class="stitle">解压后删除 <code>my-save.zip</code> 源文件</div>
+                <div class="sdesc">适合"传输临时 ZIP 然后落地解压"的场景。勾选后 ZIP 不会残留。</div>
+              </div>
+            </label>
+          </div>
+        </div>
+        <div class="foot">
+          <button class="tbtn" id="s2-modal-skip">暂不解压</button>
+          <button class="tbtn tbtn-primary" id="s2-modal-ok">解压到当前目录</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="result" id="s2-result"></div>
+  </div>
+
+  <!-- =========================================================== -->
+  <!-- 场景 3: 策略对比 -->
+  <!-- =========================================================== -->
+  <div class="demo" id="s3">
+    <p style="color:var(--text-dim);margin:0 0 18px;font-size:14px;">
+      当目标目录里已经存在某些待解压的文件或目录时，三种冲突策略的行为差异。
+    </p>
+    <table class="policy-table">
+      <thead>
+        <tr>
+          <th>情景</th>
+          <th style="color:var(--text)"><code>fail</code>（默认）</th>
+          <th style="color:var(--warn)"><code>overwrite</code></th>
+          <th style="color:var(--link)"><code>merge</code></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="scenario">目标不存在 / 是空目录</td>
+          <td><span class="verdict-ok">✓ 直接成功</span></td>
+          <td><span class="verdict-ok">✓ 直接成功</span></td>
+          <td><span class="verdict-ok">✓ 直接成功</span></td>
+        </tr>
+        <tr>
+          <td class="scenario">ZIP 内是 <code>a.txt</code>，目标已有 <code>a.txt</code>（普通文件）</td>
+          <td><span class="verdict-bad">✗ 失败回滚</span><br/><span style="color:var(--text-faint);font-size:11px;">err_extract_conflict</span></td>
+          <td><span class="verdict-mid">⚠ 覆盖</span><br/><span style="color:var(--text-faint);font-size:11px;">CRC 校验后写入</span></td>
+          <td><span class="verdict-bad">✗ 失败回滚</span><br/><span style="color:var(--text-faint);font-size:11px;">merge 仅处理目录</span></td>
+        </tr>
+        <tr>
+          <td class="scenario">ZIP 内是 <code>sub/</code>，目标已有 <code>sub/</code>（目录）</td>
+          <td><span class="verdict-ok">✓ 递归合并</span><br/><span style="color:var(--text-faint);font-size:11px;">子级再按规则</span></td>
+          <td><span class="verdict-ok">✓ 递归合并</span></td>
+          <td><span class="verdict-ok">✓ 递归合并</span></td>
+        </tr>
+        <tr>
+          <td class="scenario">ZIP 内是 <code>a.txt</code>，目标已有 <code>a.txt</code> 但它是<strong>符号链接</strong></td>
+          <td><span class="verdict-bad">✗ 拒绝写入</span><br/><span style="color:var(--text-faint);font-size:11px;">err_extract_special_entry</span></td>
+          <td><span class="verdict-bad">✗ 拒绝写入</span></td>
+          <td><span class="verdict-bad">✗ 拒绝写入</span></td>
+        </tr>
+        <tr>
+          <td class="scenario">ZIP 内含 <strong>符号链接</strong>条项（如 <code>lib → /mnt/...</code>）</td>
+          <td><span class="verdict-bad">✗ 拒绝条目</span><br/><span style="color:var(--text-faint);font-size:11px;">err_extract_special_entry</span></td>
+          <td><span class="verdict-bad">✗ 拒绝条目</span></td>
+          <td><span class="verdict-bad">✗ 拒绝条目</span></td>
+        </tr>
+        <tr>
+          <td class="scenario">ZIP 内含巨型单文件（&gt;8 GiB）或炸弹（解压比&gt;100）</td>
+          <td><span class="verdict-bad">✗ 拒绝</span><br/><span style="color:var(--text-faint);font-size:11px;">err_extract_ratio / _too_large</span></td>
+          <td><span class="verdict-bad">✗ 拒绝</span></td>
+          <td><span class="verdict-bad">✗ 拒绝</span></td>
+        </tr>
+        <tr>
+          <td class="scenario">ZIP 内含 <strong>&gt;64 GiB</strong> 单文件（如 200 GB 系统镜像）</td>
+          <td><span class="verdict-bad">✗ 拒绝</span><br/><span style="color:var(--text-faint);font-size:11px;">默认单文件上限 64 GiB</span></td>
+          <td><span class="verdict-bad">✗ 拒绝</span><br/><span style="color:var(--text-faint);font-size:11px;">冲突策略不绕过 size 限</span></td>
+          <td><span class="verdict-mid">⚠ 需显式 <code>large=1</code></span><br/><span style="color:var(--text-faint);font-size:11px;">前端 60 GiB 阈值弹窗；large profile：2 TiB 总 / 1 TiB 单文件 / ratio 1000</span></td>
+        </tr>
+        <tr>
+          <td class="scenario">用户拒绝 large 弹窗，但 ZIP &gt; 60 GiB</td>
+          <td><span class="verdict-bad">✗ 拒绝</span><br/><span style="color:var(--text-faint);font-size:11px;">默认 limits 仍生效</span></td>
+          <td><span class="verdict-bad">✗ 拒绝</span></td>
+          <td><span class="verdict-bad">✗ 拒绝</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div style="margin-top:24px;padding:14px 18px;background:var(--bg-elev);border:1px solid var(--border);border-radius:6px;font-size:13px;color:var(--text-dim);">
+      💡 <strong style="color:var(--text)">推荐用法：</strong>日常解压用默认 <code>fail</code>，需要"补丁式更新"已有目录时用 <code>merge</code>，只有确信要"以新覆盖旧"时才用 <code>overwrite</code>。
+    </div>
+  </div>
+
+  <footer>
+    PS5 Web File Manager · ZIP 解压功能交互演示 · 纯前端 mock,不发起任何真实网络请求 ·
+    数据全部内嵌在 <code>extract-demo.html</code> 单文件中
+  </footer>
+</div>
+
+<!-- =========================================================== -->
+<!-- JavaScript -->
+<!-- =========================================================== -->
+<script>
+(() => {
+  'use strict';
+
+  /* ============================================================ */
+  /* 通用工具 */
+  /* ============================================================ */
+  const $ = (id) => document.getElementById(id);
+  const fmtSize = (b) => {
+    if (b < 1024) return b + ' B';
+    if (b < 1024*1024) return (b/1024).toFixed(1) + ' KiB';
+    if (b < 1024*1024*1024) return (b/1024/1024).toFixed(2) + ' MiB';
+    return (b/1024/1024/1024).toFixed(2) + ' GiB';
+  };
+  const fmtRate = (b) => b ? fmtSize(b) + '/s' : '—';
+  const icon = (name, isDir) => isDir ? '📁' : (/\.(zip)$/i.test(name) ? '🗜️' : '📄');
+
+  /* ============================================================ */
+  /* 演示数据 */
+  /* ============================================================ */
+  // 文件池
+  const filePool = [
+    { name: 'settings.json', size: 512, mtime: '09-01 14:22' },
+    { name: 'gameplay.sav', size: 184320, mtime: '09-03 22:11' },
+    { name: 'screenshots', size: 0, mtime: '08-30 19:45', isDir: true },
+    { name: 'players', size: 0, mtime: '08-30 19:46', isDir: true },
+    { name: 'controls.cfg', size: 2048, mtime: '09-02 11:03' },
+  ];
+
+  // ZIP 内文件树（演示用，与实际 ZIP 内容对应）
+  // 三套 ZIP 内容，对应三种演示场景
+  const ZIP_SETS = {
+    clean: {  // 无冲突
+      meta: { entries: 7, total: 320512 },
+      tree: [
+        { name: 'readme.txt', size: 1024 },
+        { name: 'data.bin', size: 32768 },
+        { name: 'subdir/', isDir: true, children: [
+          { name: 'level1.json', size: 512 },
+          { name: 'level2.json', size: 768 },
+        ]},
+        { name: 'thumbnails/', isDir: true, children: [
+          { name: '001.png', size: 12288 },
+          { name: '002.png', size: 15360 },
+        ]},
+      ],
+    },
+    withConflict: {  // 顶层文件冲突，子目录新增
+      meta: { entries: 6, total: 245760 },
+      tree: [
+        { name: 'settings.json', size: 1024 },         // 与现有同名 → fail
+        { name: 'data.bin', size: 49152 },              // 新
+        { name: 'players/', isDir: true, children: [
+          { name: 'p1.dat', size: 4096 },              // 新
+        ]},
+        { name: 'logs/', isDir: true, children: [
+          { name: 'session.log', size: 2048 },         // 新
+        ]},
+      ],
+    },
+    withMix: {  // 同名目录 + 部分覆盖文件
+      meta: { entries: 8, total: 412160 },
+      tree: [
+        { name: 'manifest.xml', size: 256 },           // 新
+        { name: 'screenshots/', isDir: true, children: [
+          { name: '001.png', size: 12288 },            // 已有目录,新增文件
+          { name: '003.png', size: 16384 },
+          { name: '004.png', size: 18432 },
+        ]},
+        { name: 'controls.cfg', size: 4096 },          // 已有 → 可选覆盖
+      ],
+    },
+  };
+
+  /* ============================================================ */
+  /* 场景 1: 状态机 */
+  /* ============================================================ */
+  const s1 = {
+    // 状态
+    files: [],                 // 模拟目标目录里的文件（会带"已有"标记）
+    zipContent: null,          // 当前选中的 ZIP 内容对象
+    selectedIdx: -1,           // 当前选中的文件序号
+    scenario: 'clean',          // clean | withConflict | withMix
+    running: false,
+
+    // 元素
+    el: {
+      list: $('s1-filelist'),
+      extractBtn: $('s1-extract-btn'),
+      extractBtn2: $('s1-extract-btn-2'),
+      zipPreview: $('s1-zip-preview'),
+      zipMeta: $('s1-zip-meta'),
+      progress: $('s1-progress'),
+      psName: $('s1-ps-name'),
+      psPct: $('s1-ps-pct'),
+      psFill: $('s1-ps-fill'),
+      psEntries: $('s1-ps-entries'),
+      psTotal: $('s1-ps-total'),
+      psSpeed: $('s1-ps-speed'),
+      result: $('s1-result'),
+    },
+
+    // 初始化 / 重置
+    init() {
+      this.refreshFiles();
+      this.bindUI();
+      this.render(false);
+    },
+
+    refreshFiles(scenario) {
+      if (scenario) this.scenario = scenario;
+      const z = ZIP_SETS[this.scenario];
+      this.files = filePool.map(f => ({...f}));   // copy
+      // 按 ZIP 内容注入"已有同名"标记
+      const zipBasenames = new Set();
+      const collect = (entries) => entries.forEach(e => {
+        const base = e.name.replace(/\/$/, '');
+        zipBasenames.add(base);
+        if (e.children) collect(e.children);
+      });
+      collect(z.tree);
+      this.files.forEach(f => {
+        if (zipBasenames.has(f.name)) f.conflict = true;
+      });
+      // 注入 1 个 .zip 文件
+      const zipFile = {
+        name: this.scenario === 'clean' ? 'update-v2.zip'
+            : this.scenario === 'withConflict' ? 'patch-2024.zip'
+            : 'media-pack.zip',
+        size: z.meta.total,
+        mtime: '09-04 ' + ['10:15','12:30','13:00'][['clean','withConflict','withMix'].indexOf(this.scenario)],
+      };
+      this.files.push(zipFile);
+    },
+
+    bindUI() {
+      $('s1-reset').onclick = () => { this.teardown(); this.refreshFiles('clean'); this.selectedIdx = -1; this.zipContent = null; this.render(false); this.hideProgress(); this.clearResult(); };
+      $('s1-shuffle').onclick = () => {
+        const order = ['clean','withConflict','withMix'];
+        const next = order[(order.indexOf(this.scenario)+1) % order.length];
+        this.teardown();
+        this.scenario = next;
+        this.refreshFiles();
+        this.selectedIdx = -1;
+        this.zipContent = null;
+        this.render(false);
+        this.hideProgress();
+        this.clearResult();
+      };
+      this.el.extractBtn.onclick = () => this.openModal();
+      this.el.extractBtn2.onclick = () => this.openModal();
+    },
+
+    render(rerenderList) {
+      if (rerenderList !== false) {
+        this.el.list.innerHTML = '';
+        this.files.forEach((f, i) => {
+          const div = document.createElement('div');
+          div.className = 'filerow' + (f.name.endsWith('.zip') ? ' zip' : '') + (i === this.selectedIdx ? ' selected' : '');
+          div.innerHTML = `
+            <span class="icon">${icon(f.name, f.isDir)}</span>
+            <span class="name">${f.name}${f.conflict ? '<span style="margin-left:6px;font-size:10px;color:var(--warn);">⚠同名</span>' : ''}</span>
+            <span class="size">${f.isDir ? '—' : fmtSize(f.size)}</span>
+            <span class="mtime">${f.mtime || ''}</span>
+          `;
+          div.onclick = () => this.select(i);
+          this.el.list.appendChild(div);
+        });
+      }
+      const isZip = this.selectedIdx >= 0 && this.files[this.selectedIdx].name.endsWith('.zip');
+      this.el.extractBtn.disabled = !isZip;
+      this.el.extractBtn2.disabled = !isZip;
+    },
+
+    select(i) {
+      this.selectedIdx = i;
+      const f = this.files[i];
+      if (f.name.endsWith('.zip')) {
+        // 找到对应的 ZIP 内容
+        const z = ZIP_SETS[this.scenario];
+        this.zipContent = z;
+        this.renderZipPreview();
+        this.el.zipMeta.textContent = `entries: ${z.meta.entries} · ${fmtSize(z.meta.total)}`;
+      } else {
+        this.zipContent = null;
+        this.el.zipPreview.innerHTML = '<div style="text-align:center;padding:36px 0;color:var(--text-faint);">未选中 .zip</div>';
+        this.el.zipMeta.textContent = '';
+      }
+      this.render();
+    },
+
+    renderZipPreview() {
+      if (!this.zipContent) return;
+      let html = '';
+      const recurse = (entries, depth) => {
+        entries.forEach(e => {
+          const pad = 18 * depth;
+          if (e.isDir) {
+            html += `<div style="padding-left:${pad}px;color:var(--link);">📁 ${e.name}</div>`;
+            recurse(e.children || [], depth+1);
+          } else {
+            html += `<div style="padding-left:${pad}px;">📄 ${e.name} <span style="color:var(--text-faint);margin-left:8px;">${fmtSize(e.size)}</span></div>`;
+          }
+        });
+      };
+      recurse(this.zipContent.tree, 0);
+      this.el.zipPreview.innerHTML = html;
+    },
+
+    hideProgress() { this.el.progress.classList.remove('active'); },
+
+    clearResult() { this.el.result.innerHTML = ''; this.el.result.classList.remove('active'); },
+
+    teardown() {
+      this.running = false;
+      this.hideProgress();
+      this.el.extractBtn.disabled = true;
+      this.el.extractBtn2.disabled = true;
+    },
+
+    // 弹窗
+    openModal() {
+      const m = $('s1-modal');
+      if (m) m.classList.remove('open');
+      // 创建
+      const mask = document.createElement('div');
+      mask.className = 'modal-mask open';
+      mask.id = 's1-modal';
+      const conflictCount = this.zipContent ? this.zipContent.tree.filter(e => this.files.some(f => f.name === e.name.replace(/\/$/,'') && !f.isDir && !f.name.endsWith('.zip'))).length : 0;
+      mask.innerHTML = `
+        <div class="modal">
+          <h3>📦 确认解压</h3>
+          <div class="body">
+            <p style="margin:0 0 8px;">把 <code style="color:var(--accent)">${this.files[this.selectedIdx].name}</code> 解压到 <code>/data/saves/BOTW/</code> ？</p>
+            <p style="margin:0 0 12px;color:var(--text-dim);font-size:13px;">检测到 <strong style="color:var(--warn)">${conflictCount}</strong> 个顶层条目可能与现有文件冲突。</p>
+            <div class="strategy">
+              <label>
+                <input type="radio" name="s1-strategy" value="fail" checked>
+                <div>
+                  <div class="stitle">冲突时失败（默认）<span class="default-pill">推荐</span></div>
+                  <div class="sdesc">遇到任何同名普通文件整个解压任务回滚，已写入的文件清理干净。安全。</div>
+                </div>
+              </label>
+              <label>
+                <input type="radio" name="s1-strategy" value="overwrite">
+                <div>
+                  <div class="stitle">覆盖同名文件</div>
+                  <div class="sdesc">只覆盖普通文件。目录天然递归合并。适合"以新版本替换旧文件"。</div>
+                </div>
+              </label>
+              <label>
+                <input type="radio" name="s1-strategy" value="merge">
+                <div>
+                  <div class="stitle">合并目录</div>
+                  <div class="sdesc">同名目录递归合并，但同名文件仍按 fail 规则——只新增、不动旧。</div>
+                </div>
+              </label>
+            </div>
+            <p style="margin:14px 0 0;font-size:11px;color:var(--text-faint);">
+              <strong style="color:var(--text)">后台行为：</strong>解压过程在三阶段执行 — scan(CRC 校验) → extract(写到 staging 临时目录后 fsync+rename 原子提交) → publish(rename 到 dst)。任何阶段失败都自动回滚，无半成品文件。
+            </p>
+          </div>
+          <div class="foot">
+            <button class="tbtn" id="s1-cancel">取消</button>
+            <button class="tbtn tbtn-primary" id="s1-confirm">开始解压</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(mask);
+      mask.querySelector('#s1-cancel').onclick = () => mask.remove();
+      mask.querySelector('#s1-confirm').onclick = () => {
+        const strat = mask.querySelector('input[name="s1-strategy"]:checked').value;
+        mask.remove();
+        this.runExtract(strat);
+      };
+    },
+
+    runExtract(strategy) {
+      if (this.running) return;
+      this.running = true;
+      this.clearResult();
+      this.el.extractBtn.disabled = true;
+      this.el.extractBtn2.disabled = true;
+
+      this.el.progress.classList.add('active');
+      this.el.psName.textContent = 'scanning archive';
+      this.el.psFill.style.width = '0%';
+      this.el.psPct.textContent = '0%';
+      this.el.psEntries.textContent = `0 / ${this.zipContent.meta.entries}`;
+      this.el.psTotal.textContent = fmtSize(this.zipContent.meta.total);
+      this.el.psSpeed.textContent = '—';
+
+      // 模拟参数
+      const entries = this.flatEntries(this.zipContent.tree);
+      const flat = entries; // 已经全部 entry 数 = meta.entries
+      const totalSize = this.zipContent.meta.total;
+      let done = 0;
+      let doneBytes = 0;
+      let lastTs = performance.now();
+      let lastBytes = 0;
+      let aborted = false;
+
+      // fail 模式下，第一个冲突就停
+      let firstConflict = null;
+      if (strategy === 'fail' || strategy === 'merge') {
+        for (const e of flat) {
+          if (!e.isDir && !e.isConflict) {} // skip
+        }
+        firstConflict = flat.find(e => {
+          if (e.isDir) return false;
+          return this.files.some(f => f.name === e.name && !f.isDir && !f.name.endsWith('.zip'));
+        });
+      }
+
+      // fail 模式如果撞到 conflict, 立即失败回滚
+      if ((strategy === 'fail') && firstConflict) {
+        setTimeout(() => {
+          this.finishWithError(`冲突: 目标已存在 ${firstConflict.name}`, firstConflict.name);
+          this.running = false;
+        }, 400);
+        return;
+      }
+
+      // 正常流式
+      let i = 0;
+      const tick = () => {
+        if (aborted) return;
+        if (i >= flat.length) {
+          // 完成
+          this.el.psName.textContent = 'finalizing (publish + cleanup)';
+          this.el.psFill.style.width = '100%';
+          this.el.psPct.textContent = '100%';
+          this.el.psEntries.textContent = `${flat.length} / ${flat.length}`;
+          this.el.psSpeed.textContent = '—';
+          setTimeout(() => {
+            const ops = [];
+            flat.forEach(e => {
+              const existing = this.files.find(f => f.name === e.name && !f.isDir && !f.name.endsWith('.zip'));
+              if (existing) {
+                if (strategy === 'overwrite') ops.push({type:'overwrote', name: e.name});
+                // merge 模式下同名文件按 fail, 此处没有 fail 短路因为没冲突路径
+                // 但若 merge 也撞同名文件, 我们改: merge 下把所有同名文件标为 skipped
+                else if (strategy === 'merge') ops.push({type:'overwrote', name: e.name, skipped: true});
+              } else {
+                ops.push({type:'new', name: e.name, isDir: e.isDir});
+              }
+            });
+            this.showResult(strategy, ops);
+            this.running = false;
+            this.el.extractBtn.disabled = false;
+            this.el.extractBtn2.disabled = false;
+          }, 350);
+          return;
+        }
+        // 处理一条
+        const e = flat[i];
+        i++;
+        done++;
+        doneBytes += e.size || Math.floor(totalSize / flat.length * (0.5 + Math.random()));
+
+        // 节流 60ms（每帧 ~1-2 个）
+        const ts = performance.now();
+        const dt = ts - lastTs;
+        const speed = dt > 0 ? (doneBytes - lastBytes) / (dt/1000) : 0;
+        lastTs = ts;
+        lastBytes = doneBytes;
+
+        const pct = Math.round(done / flat.length * 100);
+        this.el.psName.textContent = e.isDir ? `creating ${e.name}/` : `extracting ${e.name}`;
+        this.el.psPct.textContent = `${pct}%`;
+        this.el.psFill.style.width = `${pct}%`;
+        this.el.psEntries.textContent = `${done} / ${flat.length}`;
+        this.el.psTotal.textContent = fmtSize(doneBytes) + ' / ' + fmtSize(totalSize);
+        this.el.psSpeed.textContent = fmtRate(speed);
+
+        const delay = 60 + Math.random() * 80;
+        setTimeout(tick, delay);
+      };
+
+      setTimeout(tick, 250);
+    },
+
+    flatEntries(tree, into = [], parentPath = '') {
+      tree.forEach(e => {
+        const path = parentPath + e.name.replace(/\/$/, '');
+        const isDir = e.name.endsWith('/');
+        into.push({ name: e.name.replace(/\/$/, ''), path, size: e.size || 0, isDir });
+        if (e.children) this.flatEntries(e.children, into, path + '/');
+      });
+      return into;
+    },
+
+    finishWithError(reason, badName) {
+      this.el.psName.textContent = 'failed: ' + reason;
+      this.el.psFill.style.background = 'linear-gradient(90deg, var(--danger) 0%, #ff8080 100%)';
+      this.el.psFill.style.width = '0%';
+      this.el.psPct.textContent = 'FAIL';
+      this.el.result.classList.add('active');
+      this.el.result.innerHTML = `
+        <div class="result-banner error">
+          <span class="check">✕</span>
+          <div>
+            <strong>解压失败</strong> · 已自动回滚（无半成品文件残留）
+            <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">
+              错误码：<code style="color:var(--danger)">err_extract_conflict</code> ·
+              冲突条目：<code>${badName}</code>
+            </div>
+          </div>
+        </div>
+        <p style="margin:14px 0 0;color:var(--text-dim);font-size:13px;">
+          💡 切换到 <code style="color:var(--warn)">overwrite</code> 策略可允许同名普通文件被覆盖；或在外部先备份现有文件后再解压。
+        </p>
+      `;
+      this.running = false;
+      this.el.extractBtn.disabled = false;
+      this.el.extractBtn2.disabled = false;
+    },
+
+    showResult(strategy, ops) {
+      const hasOverwrite = ops.some(o => o.type === 'overwrote' && !o.skipped);
+      const onlyNew = ops.every(o => o.type === 'new');
+      this.el.result.classList.add('active');
+      const bannerCls = hasOverwrite ? 'warn' : 'success';
+      const title = onlyNew
+        ? `解压成功 · 新增 ${ops.length} 个条目`
+        : strategy === 'fail' ? `解压成功 · 全部 ${ops.length} 个均为新增`
+        : hasOverwrite ? `解压成功 · ${ops.filter(o=>o.type==='new').length} 新增 / ${ops.filter(o=>o.type==='overwrote').length} 覆盖`
+        : strategy === 'merge' ? `合并成功 · ${ops.length} 个目录/条目融入`
+        : `解压成功 · ${ops.length} 个条目`;
+      const bannerTxt = onlyNew ? '<' : (strategy === 'overwrite' ? '⚠' : '✓');
+
+      let treeHtml = '<div class="diff-tree">';
+      ops.forEach(op => {
+        if (op.type === 'new') {
+          treeHtml += `<div class="diff-line new"><span class="marker">+</span><span class="name">${op.isDir ? '📁' : '📄'} ${op.name}${op.isDir ? '/' : ''}</span><span class="badge-new">新增</span></div>`;
+        } else if (op.type === 'overwrote') {
+          if (op.skipped) {
+            treeHtml += `<div class="diff-line new"><span class="marker">○</span><span class="name">📄 ${op.name}</span><span class="badge-new" style="background:var(--bg-elev2);color:var(--text-faint);">merge 跳过</span></div>`;
+          } else {
+            treeHtml += `<div class="diff-line overwrote"><span class="marker">~</span><span class="name">📄 ${op.name}</span><span class="badge-repl">覆盖</span></div>`;
+          }
+        }
+      });
+      treeHtml += '</div>';
+
+      this.el.result.innerHTML = `
+        <div class="result-banner ${bannerCls}">
+          <span class="check">${bannerTxt}</span>
+          <div>
+            <strong>${title}</strong>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">
+              策略：<code>${strategy}</code> · staging 临时目录已清理 · 目标目录 fsync 已落盘
+            </div>
+          </div>
+        </div>
+        <p style="margin:14px 0 8px;color:var(--text-dim);font-size:13px;">
+          📂 目录变更（前/后对比）：
+        </p>
+        ${treeHtml}
+      `;
+    },
+  };
+
+  /* ============================================================ */
+  /* 场景 2: 上传并解压 */
+  /* ============================================================ */
+  const s2 = {
+    zipContent: ZIP_SETS.clean,
+    fileName: 'update-v2.zip',
+    fileSize: 320512,
+    removeSource: false,
+
+    init() {
+      const drop = $('s2-drop');
+      const file = $('s2-file');
+      drop.onclick = () => file.click();
+      file.onchange = (e) => e.target.files[0] && this.handleFile(e.target.files[0]);
+      drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+      drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+      drop.addEventListener('drop', e => {
+        e.preventDefault();
+        drop.classList.remove('dragover');
+        const f = e.dataTransfer.files[0];
+        if (f) this.handleFile(f);
+      });
+      $('s2-reset').onclick = () => this.reset();
+
+      $('s2-modal-skip').onclick = () => {
+        $('s2-modal').classList.remove('open');
+        $('s2-result').classList.add('active');
+        $('s2-result').innerHTML = `
+          <div class="result-banner success">
+            <span class="check">✓</span>
+            <div>
+              <strong>上传完成</strong>
+              <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">
+                <code>my-save.zip</code> 已保存在 <code>/data/games/</code>，未触发解压。可随时选中后用 <code>解压到当前目录</code> 触发。
+              </div>
+            </div>
+          </div>
+        `;
+      };
+      $('s2-remove-source').onchange = (e) => this.removeSource = e.target.checked;
+      $('s2-modal-ok').onclick = () => this.runExtract();
+    },
+
+    reset() {
+      $('s2-drop').classList.remove('dragover','has-file');
+      $('s2-drop').innerHTML = `
+        <div class="ic">📦</div>
+        <div class="main">把 .zip 拖到此处，或<span style="color:var(--accent);text-decoration:underline;cursor:pointer">点击选择</span></div>
+        <div class="hint">仅支持 .zip，未加密、未分卷，最大 <code>8 GiB</code></div>
+        <input type="file" id="s2-file" accept=".zip" style="display:none">
+      `;
+      this.init();
+      $('s2-upload').classList.remove('active');
+      $('s2-result').classList.remove('active');
+      $('s2-result').innerHTML = '';
+    },
+
+    handleFile(f) {
+      if (!/\.zip$/i.test(f.name)) {
+        alert('仅支持 .zip 文件'); return;
+      }
+      this.fileName = f.name;
+      this.fileSize = f.size;
+      // 显示已选中
+      const drop = $('s2-drop');
+      drop.classList.add('has-file');
+      drop.innerHTML = `
+        <div class="ic" style="color:var(--accent);">📦</div>
+        <div class="main">${f.name}</div>
+        <div class="hint">${fmtSize(f.size)} · 已就绪<br/><span style="color:var(--text-faint);font-size:11px;">点击更换</span></div>
+        <input type="file" id="s2-file" accept=".zip" style="display:none">
+      `;
+      // 重新绑定
+      $('s2-file').onchange = (e) => e.target.files[0] && this.handleFile(e.target.files[0]);
+      $('s2-drop').onclick = () => $('s2-file').click();
+      // 重绑 drop 事件
+      const dropNew = $('s2-drop');
+      dropNew.addEventListener('dragover', e => { e.preventDefault(); dropNew.classList.add('dragover'); });
+      dropNew.addEventListener('dragleave', () => dropNew.classList.remove('dragover'));
+      dropNew.addEventListener('drop', e => { e.preventDefault(); dropNew.classList.remove('dragover'); const f = e.dataTransfer.files[0]; if (f) this.handleFile(f); });
+
+      // 模拟上传进度
+      this.simulateUpload(f);
+    },
+
+    simulateUpload(f) {
+      const upArea = $('s2-upload');
+      upArea.classList.add('active');
+      $('s2-up-name').textContent = f.name;
+      $('s2-up-pct').textContent = '0%';
+      $('s2-up-fill').style.width = '0%';
+
+      let pct = 0;
+      const total = f.size;
+      let doneBytes = 0;
+      const totalSec = Math.min(3, 1 + total/800000);
+      const start = performance.now();
+      $('s2-up-size').textContent = `0 / ${fmtSize(total)}`;
+
+      const tick = () => {
+        if (pct >= 100) {
+          $('s2-up-pct').textContent = '100%';
+          $('s2-up-fill').style.width = '100%';
+          setTimeout(() => {
+            upArea.classList.remove('active');
+            $('s2-modal').classList.add('open');
+          }, 400);
+          return;
+        }
+        pct = Math.min(100, pct + (100/totalSec)/15 + Math.random()*4);
+        doneBytes = (pct/100) * total;
+        $('s2-up-pct').textContent = Math.round(pct) + '%';
+        $('s2-up-fill').style.width = pct + '%';
+        $('s2-up-size').textContent = `${fmtSize(doneBytes)} / ${fmtSize(total)}`;
+        setTimeout(tick, 80);
+      };
+      tick();
+    },
+
+    runExtract() {
+      $('s2-modal').classList.remove('open');
+      // 用同一个 ZIP 内容演示解压
+      const total = this.zipContent.meta.total;
+      const entries = this.zipContent.meta.entries;
+      // 这里偷懒: 直接显示成功 banner,不再做完整解压动画(场景1已有)
+      // 但保留一个简短的"扫描中"反馈
+      $('s2-result').classList.add('active');
+      $('s2-result').innerHTML = `
+        <div class="result-banner" style="background:var(--accent-bg);border:1px solid var(--accent-border);color:var(--accent);">
+          <span class="check">⏳</span>
+          <div><strong>解压中…</strong>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">扫描完成 · 写入 /tmp/.wfm-part-XXXX → fsync → rename 原子提交</div></div>
+        </div>
+      `;
+      setTimeout(() => {
+        const ops = this.zipContent.tree.map(e => ({type:'new', name: e.name, isDir: e.isDir}));
+        let treeHtml = '<div class="diff-tree">';
+        const recurse = (entries, depth) => entries.forEach(e => {
+          const pad = 16*depth;
+          treeHtml += `<div class="diff-line new" style="padding-left:${pad+4}px;"><span class="marker">+</span><span class="name">${e.isDir ? '📁' : '📄'} ${e.name}</span><span class="badge-new">新增</span></div>`;
+          if (e.children) recurse(e.children, depth+1);
+        });
+        recurse(this.zipContent.tree, 0);
+        treeHtml += '</div>';
+
+        $('s2-result').innerHTML = `
+          <div class="result-banner success">
+            <span class="check">✓</span>
+            <div>
+              <strong>上传+解压完成${this.removeSource ? ' · 源 ZIP 已删除' : ''}</strong>
+              <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">
+                ${this.removeSource ? '✓ 已 unlink 临时 my-save.zip' : '⓵ 临时 ZIP 仍保留在 /data/games/my-save.zip，必要时可手动删除或再次解压'}
+              </div>
+            </div>
+          </div>
+          ${treeHtml}
+        `;
+      }, 1200);
+    },
+  };
+
+  /* ============================================================ */
+  /* Tab 切换 */
+  /* ============================================================ */
+  document.querySelectorAll('.tab').forEach(t => {
+    t.onclick = () => {
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.demo').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      $(t.dataset.tab).classList.add('active');
+    };
+  });
+
+  /* ============================================================ */
+  /* 启动 */
+  /* ============================================================ */
+  s1.init();
+  s2.init();
+})();
+</script>
+</body>
+</html>

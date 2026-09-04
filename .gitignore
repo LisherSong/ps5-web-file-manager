@@ -1,0 +1,25 @@
+# Build artifacts
+*.elf
+*.o
+*.d
+gen/
+web-file-mgr-linux
+
+# Sandbox probe scratch under .build/ (the tracked items there are
+# build-elf.{sh,log}, check-elf-*.py and extract-demo.html; everything
+# else is local exploration that should not enter the repo).
+.build/host-test/
+.build/obj/
+.build/probe-work/
+.build/tp/
+.build/stub/
+.build/*.exe
+.build/*.c
+.build/test-out.txt
+
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
