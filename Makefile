@@ -13,7 +13,7 @@ ifeq ($(MAKECMDGOALS),)
   endif
 endif
 
-VERSION_TAG := v1.7
+VERSION_TAG := v1.8
 TITLE_ID    := FMGR88888
 PYTHON      ?= python3
 STRIP       ?= $(PS5_PAYLOAD_SDK)/bin/prospero-strip
@@ -24,7 +24,7 @@ HOST_PKG_CONFIG ?= pkg-config
 
 BIN        := web-file-mgr.elf
 LINUX_BIN  := web-file-mgr-linux
-COMMON_SRCS := src/main.c src/websrv.c src/filemgr.c src/file_response.c src/task.c src/upload.c src/download.c src/text.c src/list.c src/space.c src/fs_util.c src/json_util.c src/path_util.c src/asset.c src/mime.c src/notify.c src/pkg_installer.c src/pkg_info.c src/extract.c src/zip_extract.c
+COMMON_SRCS := src/main.c src/websrv.c src/filemgr.c src/file_response.c src/task.c src/upload.c src/download.c src/text.c src/list.c src/space.c src/fs_util.c src/json_util.c src/path_util.c src/asset.c src/mime.c src/notify.c src/pkg_installer.c src/pkg_info.c src/extract.c src/zip_extract.c src/rar_extract.c
 PS5_SRCS    := $(COMMON_SRCS) src/app_installer.c
 LINUX_SRCS  := $(COMMON_SRCS)
 BASE_ASSETS := $(filter-out %.dds,$(wildcard assets/*))
@@ -35,10 +35,13 @@ ASSETS      := $(filter-out assets/icon0.png,$(BASE_ASSETS))
 endif
 GEN_SRCS    := $(patsubst assets/%,gen/%, $(ASSETS:=.c))
 
-# Vendored minizip-ng + zlib, compiled with relaxed warnings (third-party code).
-THIRD_PARTY_SRCS   := $(wildcard third_party/zlib/src/*.c) $(wildcard third_party/minizip-ng/src/*.c)
-THIRD_PARTY_CFLAGS := -O2 -w -Ithird_party/zlib/include -Ithird_party/minizip-ng/include \
-  -DHAVE_ZLIB -DZLIB_COMPAT -DHAVE_UNISTD_H=1 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE
+# Vendored third-party: zlib + minizip-ng (ZIP), dmc_unrar (RAR). Compiled with
+# relaxed warnings (-w) — these are not our code and we do not want to chase
+# upstream style updates on every SDK upgrade.
+THIRD_PARTY_SRCS   := $(wildcard third_party/zlib/src/*.c) $(wildcard third_party/minizip-ng/src/*.c) third_party/unrar/dmc_unrar.c
+THIRD_PARTY_CFLAGS := -O2 -w -Ithird_party/zlib/include -Ithird_party/minizip-ng/include -Ithird_party/unrar \
+  -DHAVE_ZLIB -DZLIB_COMPAT -DHAVE_UNISTD_H=1 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE \
+  -DDMC_UNRAR_DISABLE_BE32TOH_BE64TOH=1
 PS5_TP_OBJS   := $(patsubst %.c,ps5-obj/%.o,$(THIRD_PARTY_SRCS))
 LINUX_TP_OBJS := $(patsubst %.c,linux-obj/%.o,$(THIRD_PARTY_SRCS))
 

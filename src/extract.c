@@ -13,6 +13,7 @@
 #include "filemgr_internal.h"
 #include "json_util.h"
 #include "path_util.h"
+#include "rar_extract.h"
 #include "zip_extract.h"
 
 /* Cancellation callback: stop when the task is asked to cancel. */
@@ -21,6 +22,53 @@ extract_cancel(void *userdata) {
   file_task_t *task = userdata;
 
   return task_cancel_requested(task);
+}
+
+/* Case-insensitive suffix check. Returns 1 if path ends in suffix
+   (the comparison ignores trailing slashes, so "x.rar/" is still .rar). */
+static int
+ends_with_ci(const char *path, const char *suffix) {
+  size_t path_len = strlen(path);
+  size_t suf_len = strlen(suffix);
+
+  if(path_len < suf_len) {
+    return 0;
+  }
+  /* Trim trailing path separators (defensive — the API rejects them but
+     we get here with whatever path the caller passed). */
+  while(path_len && path[path_len - 1] == '/') {
+    path_len--;
+  }
+  if(path_len < suf_len) {
+    return 0;
+  }
+  return !strcasecmp(path + path_len - suf_len, suffix);
+}
+
+/* Pick the right engine by the archive file name. Returns ZIPX_ERR_FORMAT
+   for anything that does not look like a supported archive. */
+static zipx_status_t
+extract_dispatch(file_task_t *task, zipx_conflict_t conflict,
+                const zipx_limits_t *limits, zipx_result_t *result) {
+  if(ends_with_ci(task->src, ".zip")) {
+    return zipx_extract(task->src, task->dst, conflict, limits,
+                        extract_cancel, extract_progress, task, result);
+  }
+  if(ends_with_ci(task->src, ".rar")) {
+    return rar_extract(task->src, task->dst, conflict, limits,
+                       extract_cancel, extract_progress, task, result);
+  }
+  {
+    size_t len = strlen(task->src);
+    if(len > sizeof(result->detail) - 1) {
+      len = sizeof(result->detail) - 1;
+    }
+    memcpy(result->detail, task->src, len);
+    result->detail[len] = 0;
+    snprintf(result->message, sizeof(result->message),
+             "unsupported archive format (only .zip and .rar are accepted)");
+    return ZIPX_ERR_UNSUPPORTED;
+  }
 }
 
 /* Progress callback. The engine already throttles reports (200 ms / 1 MiB),
@@ -111,9 +159,9 @@ extract_worker(void *arg) {
 
   task_update(task, TASK_RUNNING, "scanning archive", 0, NULL);
 
-  status = zipx_extract(task->src, task->dst, conflict,
-                        zipx_limits_profile(task->extract_large),
-                        extract_cancel, extract_progress, task, &result);
+  status = extract_dispatch(task, conflict,
+                            zipx_limits_profile(task->extract_large),
+                            &result);
 
   if(status == ZIPX_OK) {
     time_t completed_at = time(NULL);
