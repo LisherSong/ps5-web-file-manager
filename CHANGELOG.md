@@ -5,12 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > Release artifact for v1.8.3:
-> `web-file-mgr.elf` — size TBD
-> sha256 TBD
+> `web-file-mgr.elf` — size 509 704 bytes (~497 KiB)
+> sha256 `eb60c7e4636d91e18e36e1be1dd437c99c7d82c20b85a7b5f187b2302bdfdf83`
 > ELF class 64, little-endian, e_machine `0x003e` (x86_64-sie-ps5)
 >
-> Source delta vs v1.8.2: 4 files touched (2 frontend, 2 i18n); no backend,
-> no engine, no vendored changes.
+> Source delta vs v1.8.2: 5 files touched (4 user-facing + 1 build pipeline) —
+> see [v1.8.3] below for details.
 >
 > Release artifact for v1.8.2:
 > `web-file-mgr.elf` — size 509 704 bytes (~497 KiB)
@@ -67,6 +67,18 @@ Changed:
 No backend changes — the server side was already correct. No test
 changes — the existing RAR happy-path test in `tests/test_rar_extract.c`
 passes against the same backend.
+
+Build pipeline (also v1.8.3):
+
+- `.build/build-elf.sh` step 6 "no source change → skip make" check now
+  also watches `assets/*` and `gen-asset-module.py`, not just `src/*.c`
+  and the `Makefile`. Without this, v1.8.3 (which touched no backend,
+  only frontend assets feeding `gen/*.c`) was misclassified as "no
+  change" and `make` was skipped — the result was that the v1.8.2 ELF
+  was reported as v1.8.3 with the same sha256. With this fix, only
+  frontend changes correctly trigger a rebuild. Users running the WSL
+  build need to re-copy `.build/build-elf.sh` to `/home/song/build-elf.sh`
+  (canonical source is on the Windows side).
 
 ## [v1.8.2] — 2026-09-05
 
