@@ -32,9 +32,17 @@ echo [1/4] RAR5 v6 single volume - basic-v6.rar
 "%RAREXE%" a -ep1 -m2 -ma5 -idq "%FIX%\basic-v6.rar" "%STAGE%\root.txt" "%STAGE%\dir\nested.txt" "%STAGE%\b.bin"
 if errorlevel 1 echo   [FAIL] & goto :bad
 
-echo [2/4] RAR5 v6 multi-volume - vol.part1.rar + vol.part2.rar
-"%RAREXE%" a -ep1 -m2 -ma5 -v200k -idq "%FIX%\vol.part1.rar" "%STAGE%\root.txt" "%STAGE%\dir\nested.txt" "%STAGE%\b.bin"
+echo [2/4] RAR5 v6 multi-volume - vol.part1.rar + vol.part2.rar + ...
+REM Create a 512 KB incompressible payload so -v200k actually splits it.
+fsutil file createnew "%STAGE%\big.bin" 524288 >nul 2>nul
+if not exist "%STAGE%\big.bin" (
+  echo   [WARN] fsutil unavailable - cannot force multi-volume; skipping
+  goto :aftervol
+)
+"%RAREXE%" a -ep1 -m0 -ma5 -v200k -idq "%FIX%\vol.part1.rar" "%STAGE%\big.bin" "%STAGE%\root.txt"
 if errorlevel 1 echo   [FAIL] & goto :bad
+echo   wrote: & dir /b "%FIX%\vol.part*.rar" 2>nul
+:aftervol
 
 echo [3/4] RAR5 v6 encrypted (password: secret123) - enc-v6.rar
 "%RAREXE%" a -ep1 -m2 -ma5 -psecret123 -idq "%FIX%\enc-v6.rar" "%STAGE%\root.txt" "%STAGE%\dir\nested.txt"
