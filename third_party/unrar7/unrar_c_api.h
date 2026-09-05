@@ -18,8 +18,20 @@
 
 #if defined(_WIN32) && !defined(_UNIX)
 #include <windows.h>
+#else
+/* POSIX / PS5 builds: mirror dll.hpp's _UNIX type shims so the header is
+   self-contained when included from a C translation unit (the PS5 SDK does
+   not define _UNIX for project sources; unrar defines it internally via
+   raros.hpp only when compiling its own C++ files). */
+#define CALLBACK
+#define PASCAL
+#define LONG long
+#define HANDLE void *
+#define LPARAM long
+#define UINT unsigned int
 #endif
 
+#include <stddef.h> /* wchar_t for C99 translation units */
 #include "dll.hpp"
 
 /* Re-export the exact API surface rar_extract.c consumes, so the facade
