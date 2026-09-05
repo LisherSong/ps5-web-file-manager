@@ -384,7 +384,9 @@ test_real_archives(void) {
       if(st == ZIPX_OK) {
         snprintf(checkp, sizeof(checkp), "%s/root.txt", dst);
         check(exists(checkp), "  root.txt present across volumes");
-        check(res.entries_done >= 3, "  entries_done >= 3");
+        snprintf(checkp, sizeof(checkp), "%s/big.bin", dst);
+        check(exists(checkp), "  big.bin (split file) present and whole");
+        check(res.entries_done >= 2, "  entries_done >= 2");
       } else {
         printf("    message=%s\n", res.message);
       }

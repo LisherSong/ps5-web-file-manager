@@ -660,6 +660,21 @@ scan_archive(HANDLE hArc, rarx_ctx_t *c) {
       break;
     }
 
+    /* Multi-volume: a file spanning volumes is presented as several header
+       segments with the SAME name. Segments after the first carry
+       RHDF_SPLITBEFORE; they must drive the engine forward (SKIP) but must
+       not be counted, deduped or size-accumulated again. The first segment
+       already carries the full file size. */
+    if(hdr.Flags & RHDF_SPLITBEFORE) {
+      rc = RARProcessFile(hArc, RAR_SKIP, NULL, NULL);
+      if(rc != ERAR_SUCCESS && rc != ERAR_END_ARCHIVE) {
+        ret = -1;
+        rar_translate_error(rc, hdr.FileName, c);
+        break;
+      }
+      continue;
+    }
+
     if(normalize_name(hdr.FileName, name, sizeof(name), &is_dir, &depth, c)) {
       ret = -1;
       break;
@@ -765,6 +780,18 @@ extract_archive(HANDLE hArc, rarx_ctx_t *c) {
     }
 
     is_dir = (hdr.Flags & RHDF_DIRECTORY) ? 1 : 0;
+    /* Split continuation segments still need RARProcessFile(EXTRACT) so the
+       volume chain is driven and the file is completed, but only the first
+       segment is counted / reported / size-accumulated. */
+    if(hdr.Flags & RHDF_SPLITBEFORE) {
+      rc = RARProcessFile(hArc, RAR_EXTRACT, c->staging, NULL);
+      if(rc != ERAR_SUCCESS) {
+        rar_translate_error(rc, hdr.FileName, c);
+        ret = -1;
+        break;
+      }
+      continue;
+    }
     rc = RARProcessFile(hArc, RAR_EXTRACT, c->staging, NULL);
     if(rc != ERAR_SUCCESS) {
       rar_translate_error(rc, hdr.FileName, c);
