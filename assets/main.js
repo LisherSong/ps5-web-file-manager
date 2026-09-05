@@ -2337,7 +2337,7 @@ function actionUploadAndExtract() {
 
 async function uploadAndExtractFile(file) {
   if (busy || loadingPath) return;
-  if (!/\.zip$/i.test(file.name || "")) {
+  if (!/\.(zip|rar)$/i.test(file.name || "")) {
     alert(t("err_extract_unsupported", { arg: file.name }));
     return;
   }

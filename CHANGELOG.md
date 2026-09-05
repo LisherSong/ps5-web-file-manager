@@ -4,6 +4,14 @@ All notable changes to **PS5 Web File Manager** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> Release artifact for v1.8.3:
+> `web-file-mgr.elf` — size TBD
+> sha256 TBD
+> ELF class 64, little-endian, e_machine `0x003e` (x86_64-sie-ps5)
+>
+> Source delta vs v1.8.2: 4 files touched (2 frontend, 2 i18n); no backend,
+> no engine, no vendored changes.
+>
 > Release artifact for v1.8.2:
 > `web-file-mgr.elf` — size 509 704 bytes (~497 KiB)
 > sha256 `1b2c3d68b35e32737105f17d14a80a3c159ceca0cabd274ee168cbcd81906f65`
@@ -15,6 +23,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > assertion, README/HANDOVER numeric references) + 2 PS5-only build fixes
 > (`Makefile` CFLAGS `-Ithird_party/unrar`, `src/extract.c` forward
 > declaration of `extract_progress`); no vendored or engine changes.
+
+## [v1.8.3] — 2026-09-05
+
+**Hotfix: "Upload and extract" now accepts `.rar` files.**
+
+The "upload and extract" entry was hard-coded to accept only `.zip`,
+even though the server-side dispatch in `src/extract.c:79` already
+correctly routes `.rar` to `rar_extract()`. v1.8.3 fixes the frontend
+filter so users can select a single-volume plaintext `.rar` from the
+file picker and have it uploaded + extracted in one click (the same
+flow that already worked for `.zip`).
+
+What this enables:
+
+- Choose a single-volume `.rar` from "Upload and extract"
+- Server extracts it via the existing `rar_extract()` engine
+- Uploaded `.rar` is auto-deleted after a successful extract (same as
+  `.zip` since v1.7)
+
+What this does **not** enable (planned for v1.9.0):
+
+- **Multi-volume RAR** (e.g. `name.part01.rar` + `name.part02.rar` …)
+- **Encrypted RAR** (password-protected headers or entries)
+
+Both still return `extract_unsupported` "single-volume RAR only" /
+"encrypted RAR is not supported; please extract on a PC first" — see
+the underlying engine limit in `third_party/unrar/dmc_unrar` (GPL-2.0,
+1.7.0). v1.9 will swap the vendor to **opello/unrar 7.20.1** (UnRAR
+License) which natively supports both.
+
+Changed:
+
+- `assets/index.html` — `<input id="uploadZip" accept>` now lists
+  `.rar` + the two RAR MIME types next to the existing ZIP entries.
+- `assets/main.js:2340` — `/\.zip$/i` → `/\.(zip|rar)$/i` (the upload
+  pre-check), plus a local `isRar` flag so the next step branches.
+- `assets/lang-en.js` — `extractUploadConfirm`: "uploaded ZIP" →
+  "uploaded archive".
+- `assets/lang-zh.js` — `extractUploadConfirm` & `extractLargeAsk`
+  drop the "ZIP" wording so the copy reads sensibly for RAR uploads.
+
+No backend changes — the server side was already correct. No test
+changes — the existing RAR happy-path test in `tests/test_rar_extract.c`
+passes against the same backend.
 
 ## [v1.8.2] — 2026-09-05
 

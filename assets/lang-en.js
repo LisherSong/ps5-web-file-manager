@@ -101,7 +101,7 @@ window.WFM_LANG = {
   extracting: "Extracting",
   extractConfirm: "Extract {name} to {path}?",
   extractOverwriteAsk: "If a file or folder with the same name already exists in the target:\n\nOK = overwrite same-name files (folders still merge)\nCancel = fail if the target already exists",
-  extractUploadConfirm: "Upload and extract {name}?\n\nTarget folder: {path}\nThe uploaded ZIP will be deleted after success.",
+  extractUploadConfirm: "Upload and extract {name}?\n\nTarget folder: {path}\nThe uploaded archive will be deleted after success.",
   extractStarted: "Extraction started: {name}",
   extractDone: "Extraction complete: {name}",
   extractProgress: "{done} / {total} files",
