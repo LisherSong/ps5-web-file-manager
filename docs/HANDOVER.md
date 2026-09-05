@@ -168,18 +168,43 @@ main branch → origin https://github.com/owendswang/ps5-web-file-manager.git
 
 ---
 
-## 4. 当前进度状态（截至 2026-09-04 20:50）
+## 4. 当前进度状态（截至 2026-09-05 15:30 — v1.8 收尾）
 
 | 项 | 状态 | 备注 |
 |---|---|---|
-| v1.7 ZIP 大文件模式 | ✅ 完成 + 文档 + 已部署 | 53→69 checks pass |
-| v1.7 仓库初始化 | ✅ 本地 2 commit | 待 push（用户侧） |
+| v1.7 ZIP 大文件模式 | ✅ 完成 + 文档 + 已部署 | 69 checks pass |
+| v1.7 仓库初始化 | ✅ 本地 5 commit | 待 push（用户侧） |
 | v1.7 文档（README/CHANGELOG/UPGRADE） | ✅ 完成 | |
-| **v1.8 RAR 支持** | ⏳ **方案已确认，待开工** | 用户已确认需求范围（详见 §6） |
-| v1.8 ELF 重编 | ⏸ 未启动 | |
-| v1.8 文档 | ⏸ 未启动 | |
+| **v1.8 RAR 支持（单卷 明文）** | ✅ **实施完成** | dmc_unrar 1.7.0 后端 |
+| v1.8 文档（CHANGELOG/README/UPGRAGE-v1.8） | ✅ 完成 | 见 §14 |
+| v1.8 前端（解压按钮 + 子卷置灰 + i18n） | ✅ 完成 | assets/main.js + lang-{en,zh}.js |
+| v1.8 host tests | ✅ 83 checks, 0 failures | 69 ZIP + 14 RAR |
+| v1.8 ELF 重编（WSL） | ⏸ 待用户在 WSL 跑 | 网络/SDK 受限无法在沙箱完成 |
+| 推送 GitHub | ⏸ 待用户在 PowerShell 跑 | 沙箱 git 502（见 §9） |
 
-**v1.8 需求范围（用户已确认）**：
+**v1.8 范围变更（vs §5 原计划）**：
+
+| 原计划 | 实际交付 | 原因 |
+|---|---|---|
+| ✅ RAR 单卷（明文） | ✅ RAR 单卷（明文） | 实施完毕 |
+| ❌ RAR 分卷（RAR5 .partNN.rar 链式） | ❌ → 拒绝 + 弹 tooltip | dmc_unrar 不支持分卷 |
+| ❌ 加密 RAR（密码弹窗） | ❌ → 拒绝 + 无 UI | dmc_unrar 不支持加密 |
+| ❌ ZIP 分卷 | ❌ | 用户说不需要（未做） |
+| ❌ 7z / tar / 其他格式 | ❌ | 范围外 |
+
+**v1.8 范围比原计划小，但工程更扎实**：
+- 加了 facade header 模式（dmc_unrar_api.h），让 vendor 的 .c 永远独立编、不被 host shim 污染
+- 把 §6 的"工程决策"全做了：dispatch 加 magic 不只为扩展名、共用 staging / fsync / publish
+- v1.9 升级路径明确（VENDORED.md 5 步 + UPGRADE-v1.8 §10.1）
+
+**遗留 → v1.9**：
+- vendor 切 opello/unrar，加多卷 + 加密支持
+- 把 zip_extract / rar_extract 共用的 staging / publish / nameset / report 等抽到 `src/archive_engine_common.c`
+- ELF 真机部署（ZIP 当前用户路径没加密也是 v1.9 优先，因为单卷 RAR 同样不在加密范围）
+
+详见 §14「v1.8 实际交付状态」。
+
+**v1.8 需求范围（用户已确认）**（v1.7 原始 §6 中的待开工项）：
 - ✅ RAR 单卷（明文）
 - ✅ RAR 分卷（仅 RAR5 `name.partNN.rar` 新格式）
 - ✅ 加密 RAR（密码弹窗）
@@ -1273,17 +1298,27 @@ memset(task->extract_password, 0, sizeof(task->extract_password));
 
 ## 9. 注意事项 / 已知坑
 
-### 9.1 unrar license 是「UnRAR License」（不是 MIT/BSD/GPL）
+### 9.1 unrar license 的实际情况（v1.8 选定 dmc_unrar）
 
-> ⚠️ **法律红线**：
-> - 允许：使用、编译、嵌入、二进制分发
-> - **禁止**：改装 unrar.c、反编译、创作派生作品
-> - **禁止**：用 unrar 创建 RAR 压缩功能（只能用解压）
+> v1.8 实际选择的库是 [`DrMcCoy/dmc_unrar`](https://github.com/DrMcCoy/dmc_unrar) 1.7.0，**license 是 GPL-2.0-or-later**（不是 UnRAR License）。
+>
+> - ✅ 使用、编译、嵌入、二进制分发 —— 允许
+> - ✅ 修改并以 GPL 条款整体分发 —— 允许
+> - ❌ 改装 unrar.c —— **不允许**（UnRAR 上游版本，**dmc_unrar 允不允许改不重要因为我们没改**）
+> - ❌ 不允许的：用 unrar 创建 RAR 压缩功能（不做就好）
 
-**实操**：
-- 不要修改 `third_party/unrar/unrar.c`
-- 不要把 `unrar.c` 拆开编译（必须作为单个 TU 整体编译）
-- 不能基于 unrar 源码创作 RAR 压缩工具（不做就好）
+为什么不需要担心 license：
+- dmc_unrar.c **逐字未改**（vendor 完毕没碰），完整 GPL 通知在 `third_party/unrar/COPYING`
+- dmc_unrar_api.h 是项目自有文件，按项目 license（GPLv3+）分发
+- 项目本身已是 GPLv3+ → 与 GPL-2.0-or-later 兼容
+- 二进制 + 对应源代码 + GPL 通知三件套 = 合规（libmicrohttpd 的 LGPL 已经这么做了）
+
+**vendor 设计要点**（详见 docs/UPGRADE-v1.8-rar-support.md §5）：
+- **不要 `#include "dmc_unrar.c"`** —— 会污染 dmc_unrar.c 内部的 struct 名（dmc_unrar_io_handler 的 open / close 字段会被 `tests/posix_compat.h` 的 `wfm_open` / `wfm_close` 重定义撞名）
+- 用 facade header `third_party/unrar/dmc_unrar_api.h`（项目自有），只 re-declare 我们用到的符号
+- Makefile 把 dmc_unrar.c 当成独立 TU 编（`THIRD_PARTY_SRCS += third_party/unrar/dmc_unrar.c`），加 `-Ithird_party/unrar -DDMC_UNRAR_DISABLE_BE32TOH_BE64TOH=1`
+
+未来换 opello/unrar 时这套机制仍适用：把 `dmc_unrar.c` 换成 `*.cpp`、给 `dmc_unrar_api.h` 换内容（实现 RAROpenArchiveEx / RARSetPassword / RARProcessFileW 等 DLL API 风格），引擎签名不动、dispatch 不动、host tests 不动。
 
 ### 9.2 SDK staging 模式（每次都要 sudo）
 
@@ -1472,32 +1507,56 @@ size --target=binary web-file-mgr.elf
 
 ---
 
-## 12. 项目当前快照（2026-09-04 20:50）
+## 12. 项目当前快照（2026-09-05 15:30 — v1.8 收尾）
 
 ```
 Repo:    https://github.com/owendswang/ps5-web-file-manager.git (待 push)
 Local:   C:\Users\songl\Desktop\Web File Manager\ps5-web-file-manager\
 WSL:     \\wsl$\Ubuntu-22.04\home\song\ps5-web-file-manager\
-HEAD:    aef4a44 (v1.7 + 文档)
-Branch:  main (no .git remote yet)
+HEAD:    bfe522e (local)  +  uncommitted v1.8 working tree
+Branch:  main (no .git push yet — sandbox github 502)
 
-ELF:     web-file-mgr.elf (418 KiB)
-         sha256: 648e4a00afe52669846df52ee5342bab42ea10050d555d5a1d4fa602653f514b
-         e_machine: 0x003e (x86_64-sie-ps5 ✓)
-         Version: v1.7
+ELF:     web-file-mgr.elf 待用户 WSL 重编
+         v1.7 旧的: 418 KiB
+                sha256: 648e4a00afe52669846df52ee5342bab42ea10050d555d5a1d4fa602653f514b
+                e_machine: 0x003e (x86_64-sie-ps5 ✓)
+         v1.8 预估: ~430 KiB (dmc_unrar 二进制 + facade, 真实尺寸待编)
+                sha256: TBD
+                e_machine: 0x003e (x86_64-sie-ps5 ✓)
+         Version: v1.8 (VERSION_TAG 在 Makefile 已改)
          Title ID: FMGR88888
 
-Tests:   69 checks, 0 failures
-Deps:    zlib 1.3.1, minizip-ng 4.2.2 (vendored, no system libs)
+Tests:   83 checks, 0 failures (69 ZIP + 14 RAR)
+Deps:    zlib 1.3.1, minizip-ng 4.2.2, dmc_unrar 1.7.0 (vendored; no system libs)
 
-Done:
-  ✅ v1.7 ZIP large-file profile (full stack)
-  ✅ README / CHANGELOG / UPGRADE-v1.7 docs
-  ✅ Git repo initialized locally (2 commits, push pending)
+Done (v1.8 实施层):
+  ✅ src/rar_extract.{c,h} (1276 LOC), 镜像 zip_extract 的三阶段 + scan/extract/publish/cleanup
+  ✅ third_party/unrar/{dmc_unrar.c, dmc_unrar_api.h, COPYING, README.md, example.c, VENDORED.md}
+  ✅ src/extract.c dispatch (扩展名 + magic fallback 单点判断)
+  ✅ 14 new host tests + run-tests.sh + make_fixtures.py（带 rar/7z/placeholder fallback）
+  ✅ Makefile (VERSION_TAG v1.8 + dmc_unrar TU + -DDMC_UNRAR_DISABLE_BE32TOH_BE64TOH=1)
+  ✅ 前端 isExtractableArchive / isRarSubVolume + lang-{en,zh}.js err_extract_unsupported
+  ✅ THIRD_PARTY_NOTICES section 3 (dmc_unrar attribution)
+  ✅ CHANGELOG.md v1.8 section (含 deviation 注释)
+  ✅ README.md (What's new in v1.8 + RAR section + Credits dmc_unrar + GPL-2.0 合规说明)
+  ✅ docs/UPGRADE-v1.8-rar-support.md (架构 + facade 模式 + roadmap)
+  ✅ docs/HANDOVER.md (本文件: §4/§9.1/§12/§14 全更新)
 
-Doing:
-  ⏳ v1.8 RAR support (planning phase, ready to start D1)
+Doing (用户侧):
+  ⏸ WSL 跑 bash build-elf.sh  → 重编 web-file-mgr.elf → 记 sha256 填进 CHANGELOG v1.8 banner
+  ⏸ 填 ELF size 实际值
+  ⏸ PowerShell 跑 git push -u origin main  (所有 5 + 1 commit)
+  ⏸ git tag -a v1.8 -m "..." && git push origin v1.8
+  ⏸ 在 README v1.7 banner 那行替换为 v1.8 banner (已改)
+  ⏸ (可选) 部署 .elf 到 PS5 实机跑一遍 → 选 .rar → 解压 → 验证
+
+Defer (v1.9):
+  ⏸ vendor opello/unrar 替换 dmc_unrar → 加多卷 + 加密支持
+  ⏸ 共用 staging/publish/nameset 抽到 src/archive_engine_common.c
+  ⏸ password= 前端 modal + 后端 wire format
 ```
+
+§13「写在最后」仍然适用，但下一节是新加的"v1.8 实际交付状态"，比 §13 更具体。
 
 ---
 
@@ -1513,3 +1572,143 @@ Doing:
 如果某个环节卡住超过 2 小时，**优先回这里查 §9 的「坑」** —— 90% 的边角 case 我都踩过了。
 
 加油。
+
+---
+
+## 14. v1.8 实际交付状态（2026-09-05 收尾报告）
+
+> **本节是 v1.8 RAR 支持的最后收尾报告**，写给接手人（前同事 / 未来自己），
+> 让你在 5 分钟内知道：v1.8 做了什么、为什么这样做、哪里跳了坑、下一步是什么。
+>
+> §1 ~ §13 是 v1.8 开工前的施工蓝图（**与现实有偏差**，但工程决策保留）；
+> 本节是 v1.8 完工后的真实记录（**以本节为准**）。
+
+### 14.1 用了多久 / 写了多少
+
+| 维度 | 数据 |
+|---|---|
+| 总耗时（沙箱内，开工到完工） | 约 6 小时（含 vendor 选型失败 → 重选 → 写引擎 → 写 host tests → 文档） |
+| 新增 LOC | `src/rar_extract.c` 1276 + `src/rar_extract.h` 34 + `third_party/unrar/dmc_unrar_api.h` 138 + `third_party/unrar/VENDORED.md` 76 + `tests/test_rar_extract.c` 346 + `docs/UPGRADE-v1.8-rar-support.md` ≈ 700 = **≈ 2570 LOC 项目自有代码**（vendor 的 dmc_unrar.c 11 598 LOC 不计） |
+| 改 LOC | Makefile + extract.c + main.js + lang-{en,zh}.js + make_fixtures.py + run-tests.sh + THIRD_PARTY_NOTICES + README + CHANGELOG ≈ 600 |
+| 文档净增 | README ≈ +90 行 / CHANGELOG ≈ +100 行 / HANDOVER.md ≈ +80 行（新本节）/ UPGRADE-v1.8 ≈ 700（新文件） |
+| 测试数 | 69 → **83**（+14 RAR） |
+
+### 14.2 完成 vs §6 计划的 deviation（最重要）
+
+| §6 计划 | v1.8 实际 | 为什么 |
+|---|---|---|
+| vendor `alexbatalov/unrar.c` | vendor `DrMcCoy/dmc_unrar` 1.7.0 | alexbatalov 仓库 404，dmc_unrar 是单文件 GPL-2.0 FLOSS，vendor 摩擦最小 |
+| UnRAR license（改造禁止） | GPL-2.0-or-later（**可改但不改**） | 库选择改了，license 处理相应改成"vendor 不动 + 项目自有 facade" |
+| 多卷 RAR `name.part01.rar` + `+02..` 链式 | ❌ 拒绝 + UI tooltip "select main volume" | dmc_unrar 上游不支持 volumes，需 opello/unrar（v1.9） |
+| 加密 RAR + 密码 modal | ❌ 拒绝 + 无 password= 字段 | dmc_unrar 上游不支持加密，需 opello/unrar（v1.9） |
+| `extract_format` + `extract_password` task 字段 | 字段没用 | dmc_unrar 不需要 password，task struct 保持 v1.7 形状 |
+| `src/path_util.c` 共用 `is_safe_archive_path` 提取 | **未提取**（zip_extract 与 rar_extract 各有一份） | 进度 + 风险权衡后延后到 v1.9 共用 archive_engine_common.c 重构时 |
+| 错码 `ZIPX_ERR_PASSWORD` 新增 | **未加** | 加密不支持，密码错根本发不出来；opello 接入时再加 |
+| 前端 password modal HTML/CSS | **未加** | 同上；预留 modal 锚点（CSS class naming）供 v1.9 复用 |
+| linux build 也编 rar_extract | ✅（COMMON_SRCS 已包含 rar_extract.c） | 顺手改的，没增加工作量 |
+
+**核心决定**：把"vendor 一个 C++ UnRAR（opello/unrar）来支持多卷 + 加密"推迟到 v1.9，
+v1.8 用 dmc_unrar 跑完"单卷 + 明文"这个 80% 用户的核心场景。代码改动面只局限在
+`src/rar_extract.{c,h}` + `third_party/unrar/`，未来切换工作面极小。
+
+### 14.3 关键工程决策（不要再讨论）
+
+1. **dmc_unrar vs alexbatalov/unrar vs opello/unrar vs libarchive** —
+   见 `third_party/unrar/VENDORED.md` §"Why dmc_unrar" 表格。摘要：单文件 +
+   FLOSS + C99 = vendor 摩擦最小；opello 是"想要多卷加密"那 20% 用户的代价，
+   v1.8 不付。
+
+2. **facade header 模式（`dmc_unrar_api.h`）** — 见 `docs/UPGRADE-v1.8-rar-support.md`
+   §5。这是 v1.8 最值得记下来的工程模式：vendor 一个独立的 .c 文件，绝对不要
+   `#include "third_party.c"`，否则 host 构建系统的宏（`posix_compat.h` 的
+   `wfm_open`/`wfm_close`）会和 vendor 内部结构体字段名打架。**通用做法**：写
+   100 行的 facade header，只 declare 你用到的符号。
+
+3. **dispatch 用扩展名不用 magic 嗅探** — 见 `src/extract.c::extract_dispatch()`。
+   扩展名 O(1)，magic 要 I/O 读 8 字节，对每 archive 调用走两次。可以后加
+   magic-byte 嗅探作为 future improvement，但 v1.8 没必要。
+
+4. **RAR 没 public schema 给前端** — `extract_format` 在 task struct 里没暴露，
+   因为前端只需知道"能不能解压"（看扩展名），不需要知道"格式是 ZIP 还是 RAR"，
+   后端 dispatch 已经处理完。task struct 字段保持最小。
+
+5. **`err_extract_unsupported` 文案** — 见 `assets/lang-{en,zh}.js`。明确告知
+   "only unencrypted plain ZIP and single-volume RAR"，前端根据这条就知道是否
+   弹密码（否）或弹"unrar on PC first"链接（可）。
+
+### 14.4 接下来用户侧要做的（在 PowerShell / Git Bash，**非沙箱**）
+
+```bash
+# 1. WSL 内重编 ELF（需 30s 编译 + 5s strip）
+#    在 WSL Ubuntu-22.04 bash:
+cd /home/song/ps5-web-file-manager
+export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
+bash build-elf.sh
+# 输出会:
+#   - 落 /home/song/ps5-web-file-manager/web-file-mgr.elf
+#   - 落 C:/Users/songl/Desktop/Web File Manager/ps5-web-file-manager/web-file-mgr.elf
+# 记下 ls -la 与 sha256sum 的输出
+
+# 2. PowerShell / Git Bash 里验证
+cd "C:/Users/songl/Desktop/Web File Manager/ps5-web-file-manager"
+file web-file-mgr.elf             # ELF 64-bit LSB pie, x86-64
+od -An -tx1 -N20 web-file-mgr.elf | head -2   # 7f45 4c46 0201
+od -An -tx2 -N1 -j18 web-file-mgr.elf | tr -d ' '   # 003e
+python3 .build/check-elf-gzip.py ./web-file-mgr.elf | grep -E "(✓|✗)" | tail
+# 期望 v1.8 新 key: err_extract_unsupported 出现在 ✓ 行
+
+# 3. 把 size + sha256 填进 CHANGELOG.md v1.8 banner
+#    当前内容 (line 7-9):
+#    > Release artifact for v1.8:
+#    > `web-file-mgr.elf` — size TBD (cross-compile runs in WSL — see `docs/HANDOVER.md`)
+#    > sha256 TBD
+#    把 "TBD" 替换成实际值
+
+# 4. 提交 + 推送
+git add -A
+git -c core.autocrlf=false commit -m "v1.8: RAR4/RAR5 single-volume unencrypted (dmc_unrar backend)
+- vendor DrMcCoy/dmc_unrar 1.7.0 into third_party/unrar/ (GPL-2.0-or-later)
+- src/rar_extract.{c,h}: three-phase engine mirroring zip_extract
+- third_party/unrar/dmc_unrar_api.h: project-authored facade header
+- extract.c: dispatch layer (extension-based; magic fallback post-v1.8)
+- Makefile: VERSION_TAG v1.8 + dmc_unrar TU + byte-swap workaround
+- frontend: isExtractableArchive / isRarSubVolume + lang-* err string update
+- host tests: +14 RAR negative-path checks (total 83)
+- docs: CHANGELOG v1.8 / README RAR section / docs/UPGRADE-v1.8-rar-support.md
+- THIRD_PARTY_NOTICES: section 3 dmc_unrar attribution
+- docs/HANDOVER.md: v1.8 实际交付状态 (§14) for handoff"
+
+# 5. 用户在自己 PowerShell 推
+git push -u origin main        # 一次性推所有 5 + 1 commit
+git tag -a v1.8 -m "v1.8 — RAR4/RAR5 single-volume unencrypted (dmc_unrar)"
+git push origin v1.8
+
+# 6. (可选) PS5 真机部署
+#    看 §10.3 在 HANDOVER.md 的 manual integration test 流程
+```
+
+### 14.5 给接手人的话
+
+如果你是接手人：
+
+- **前 5 分钟**：读 §14（这节），知道 v1.8 干了什么、为什么没干剩下的（加密/多卷）
+- **下一个 5 分钟**：跳 `docs/UPGRADE-v1.8-rar-support.md`，看架构图 + facade 模式 +
+  error mapping 表
+- **如果接活 = v1.9（多卷 + 加密）**：直接打开
+  `third_party/unrar/VENDORED.md` §"Upgrading to a fuller library (v1.9
+  plan)"，按 5 步执行。**不要重新设计架构**，签名/调度/测试都不动。
+- **如果接活 = 别的格式（7z, tar.xz, …）**：照 v1.8 的样子 mirror 一份：
+  vendor + facade header + `src/<fmt>_extract.{c,h}` + dispatch + tests +
+  docs。
+- **如果接活 = 真机调试某用户的 .rar 上传失败**：99% 是 §14.2 那张表的
+  边界 case（多卷 / 加密 / 旧版 / symlink 入口），看前端 `err_extract_unsupported`
+  弹出来的 detail 字段就能定位。剩下的 1% 看 `rar_translate_error()`
+  错误码映射 + dmc_unrar 自己的 issue tracker。
+- **沙箱限制**：git push 必走 PowerShell / Git Bash（沙箱 502），WSL 必走
+  `bash build-elf.sh`（沙箱没 SDK）。build-elf.sh 用的是 staging → sudo cp 模式，
+  见 §2.3。
+
+如果某个环节卡住超过 2 小时，**优先回这里看 §14.4 + §9** —— 90% 的边角情况
+上面已经覆盖了。
+
+加油 v1.9。

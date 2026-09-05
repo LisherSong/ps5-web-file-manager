@@ -2,7 +2,7 @@
 
 > Homebrew HTTP file manager for jailbroken PS5 consoles. Browse, edit, upload, download and extract ZIPs through any browser on the same network — single self-contained ELF payload, no external services, no telemetry.
 
-**Version:** v1.7 · **Title ID:** `FMGR88888` · **License:** GPLv3+ · **Target:** `x86_64-sie-ps5`
+**Version:** v1.8 · **Title ID:** `FMGR88888` · **License:** GPLv3+ · **Target:** `x86_64-sie-ps5`
 
 ---
 
@@ -11,6 +11,34 @@
 A payload ELF that runs an HTTP file manager inside a jailbroken PS5. Open `http://<PS5_IP>:8888/` from any browser on the LAN — including the PS5 browser itself — to manage files on attached USB storage and the user partition. Designed for safely copying game-dump folders from USB to internal storage, but it also handles general file management, in-place text editing, PKG preview/install, image preview, and ZIP extraction with built-in zip-bomb protection.
 
 The same source tree builds a Linux binary for development and a PS5 payload ELF for deployment — see `make linux` below.
+
+## What's new in v1.8
+
+- **Single-volume RAR extraction** via the vendored FLOSS library
+  [`dmc_unrar`](https://github.com/DrMcCoy/dmc_unrar) (GPL-2.0-or-later).
+  RAR 1.5, 2.x, 3.x, 4.x and 5.x archives are supported. `.rar` files
+  appear in the file list with the **Extract** button enabled; the button
+  is greyed out on `.part02+.rar` sub-volumes with the tooltip "select
+  the main volume instead" — v1.8 cannot stitch multi-volume RARs (see
+  the [RAR extraction](#rar-extraction) section below).
+- **Shared extraction protocol** between the new `src/rar_extract.c`
+  engine and the existing `src/zip_extract.c` engine: same `zipx_status_t`
+  codes, same `zipx_limits_t` profile (default / `large=1`), same
+  three-phase model (`scan → extract → publish → cleanup`), same staging
+  directory layout, same conflict policy, same error mapping into the
+  task UI. The dispatcher in `src/extract.c` is one tiny
+  `ends_with_ci(…)` switch.
+- **14 new host-side C tests** (`tests/test_rar_extract.c`) wired into
+  the existing `tests/run-tests.sh`. Coverage: format dispatch, error
+  translation across every `DMC_UNRAR_*` code that affects RAR users,
+  limit-profile handoff. Total host checks: **69 ZIP + 14 RAR = 83**.
+- **Documentation**: [`CHANGELOG.md`](./CHANGELOG.md),
+  [`docs/UPGRADE-v1.8-rar-support.md`](./docs/UPGRADE-v1.8-rar-support.md)
+  and the vendoring decision tree at
+  [`third_party/unrar/VENDORED.md`](./third_party/unrar/VENDORED.md).
+- See the [dedicated section](#rar-extraction) below for scope and the
+  limitations that come from using dmc_unrar (no multi-volume, no
+  encryption in v1.8 — both lift in v1.9 when the library is replaced).
 
 ## What's new in v1.7
 
@@ -40,7 +68,7 @@ The same source tree builds a Linux binary for development and a PS5 payload ELF
 - **Upload** — single files or folder trees from any device on the LAN (hidden in the PS5 browser). Atomic temp + rename.
 - **Download** — single file as raw bytes, or folders/multi-select as a streaming `.tar`. Hidden in the PS5 browser.
 - **Tasks** — full-screen overlay with delayed show, live progress, throughput, ETA, cancel, and recovery if the browser is closed and reopened mid-task.
-- **ZIP extraction** — see the [dedicated section](#zip-extraction) below.
+- **Archive extraction** — ZIP (encrypted rejected) and RAR (single-volume unencrypted); see the [ZIP extraction](#zip-extraction) and [RAR extraction](#rar-extraction) sections below for scope.
 - **PKG** — install and preview `.pkg` files.
 - **Images** — preview `.png .jpg .jpeg .gif .bmp .webp`.
 - **Localization** — English + Simplified Chinese, auto-selected from `navigator.languages`.
@@ -164,12 +192,100 @@ const LARGE_FILE_THRESHOLD_BYTES = 60 * 1024 * 1024 * 1024;
 
 Set it to `Infinity` to silence the prompt, lower it to be more conservative, or remove the call entirely — the server still respects `large=1` regardless of the threshold.
 
+## RAR extraction
+
+A single-volume, **unencrypted** RAR archive engine (`src/rar_extract.{c,h}`,
+backed by the vendored FLOSS library
+[`dmc_unrar`](https://github.com/DrMcCoy/dmc_unrar) at
+`third_party/unrar/dmc_unrar.c`). Files with the extension `.rar` get the
+same **Extract** button as `.zip` files; the engine is dispatched by
+`src/extract.c` based on extension.
+
+### Scope
+
+| Format | Support | Notes |
+|---|---|---|
+| RAR 1.5 / 2.0 / 2.6 / 2.9 / 3.0 / 3.6 / 4.0 | ✅ | Single-volume, unencrypted |
+| RAR 5.0 | ✅ | Single-volume, unencrypted |
+| Solid blocks, dictionary 4 MiB (RAR4) / 32 MiB (RAR5) | ✅ | |
+| PPMd decompression (RAR 3.0+) | ✅ | |
+| **Multi-volume** (`.part01.rar` + `.part02.rar` + …) | ❌ | Rejected with `ZIPX_ERR_UNSUPPORTED`. The frontend greys out non-`01` sub-volumes with a tooltip. Join / unrar on a PC first. |
+| **Encrypted RAR** (any encrypted header or file) | ❌ | Rejected with `ZIPX_ERR_UNSUPPORTED`. There is no `password=` field in `/api/extract`. |
+| Symbolic links / FIFOs / sockets / devices | ❌ | Rejected with `ZIPX_ERR_SPECIAL` (mirrors ZIP behaviour) |
+| RAR 1.4 (very old) | ❌ | Not supported by dmc_unrar 1.7.0; rejected upstream |
+
+The "extract on a PC first" recovery is the same escape hatch the engine
+uses for ZIP encryption errors: when an unsupported archive is rejected,
+the user gets an `extract_unsupported` failure with the file name as the
+detail argument. The frontend already shows this with the typical
+bilingual retry guidance.
+
+### Limits
+
+The RAR engine re-uses the ZIP limits table verbatim — there is no RAR
+profile table on top. Defaults and the `large=1` opt-in are identical:
+
+| Limit | Default profile | Large profile (`large=1`) |
+|---|---|---|
+| `max_entries` | 200 000 | 500 000 |
+| `max_total_bytes` (uncompressed) | 512 GiB | 2 TiB |
+| `max_file_bytes` (per entry) | 64 GiB | 1 TiB |
+| `max_ratio` (uncompressed / compressed) | 200 : 1 | 1000 : 1 |
+| `max_depth` (folder nesting) | 32 | 32 |
+| `max_name_len` / `max_path_len` | 255 / 1024 | 255 / 1024 |
+
+Large-profile RAR extraction uses the same `LARGE_FILE_THRESHOLD_BYTES`
+(60 GiB) prompt as ZIP — the frontend treats `.rar` and `.zip` the same
+way for the prompt, and the server only ever activates the large caps
+when the request carries `large=1` (opt-in).
+
+### Security checks
+
+The RAR engine applies the same checks as the ZIP engine — re-uses
+`zipx_status_t` codes, so the task UI's `err_extract_unsafe_name`,
+`err_extract_too_deep`, `err_extract_ratio`, etc. all fire identically:
+
+- Path traversal (`..` segments, absolute POSIX paths, Windows drive
+  letters, `\` treated as a path separator after a `Rar!\x1a\x07…`
+  header, etc.).
+- Symbolic links, FIFOs, sockets, devices.
+- Duplicate entries or directory/file name clashes inside the archive.
+- Archive size, entry count, depth, name length or compression ratio
+  breaches of the active profile.
+
+### Vendoring and licence
+
+`third_party/unrar/dmc_unrar.c` is vendored **verbatim** from
+[`DrMcCoy/dmc_unrar`](https://github.com/DrMcCoy/dmc_unrar), upstream
+commit pinned at the same date as the v1.8 release. The file is
+**GPL-2.0-or-later** (see `third_party/unrar/COPYING`), which means the
+resulting `web-file-mgr.elf` is also effectively GPL-2.0-or-later. The
+already-GPLv3+ project is forward-compatible with that, and the
+compliant distribution form (binary + corresponding sources + GPL
+notice alongside the LGPL notice for libmicrohttpd) is the same
+process you already follow for every prior release. The minimal
+project-authored facade `third_party/unrar/dmc_unrar_api.h` carries the
+project's own licence and is *not* bound to GPL.
+
+### v1.9 plan
+
+When (if) multi-volume RAR and encrypted RAR become worth the
+engineering cost, the recommended path is to replace
+`third_party/unrar/dmc_unrar.c` with a vendored mirror of
+[`opello/unrar`](https://github.com/opello/unrar) (a faithful copy of
+rarlab UnRAR 7.x, C++17, supports volumes + encryption). The
+`rar_extract()` signature, the dispatch layer, and the host tests do
+**not** need to change — only the engine behind `rar_extract()` and the
+`password=` field on `/api/extract`. See
+[`third_party/unrar/VENDORED.md`](./third_party/unrar/VENDORED.md) for
+the step-by-step upgrade recipe.
+
 ## Verification
 
 After `make`, sanity-check the produced ELF:
 
 ```sh
-ls -la web-file-mgr.elf                            # size ~418 KiB
+ls -la web-file-mgr.elf                            # size ~430 KiB on v1.8 (~418 KiB on v1.7)
 sha256sum web-file-mgr.elf                         # record the digest in your release notes
 file  web-file-mgr.elf                             # expect "ELF 64-bit LSB pie executable, x86-64"
 od -An -tx1 -N20 web-file-mgr.elf | head -2        # magic 7f45 4c46 0201 + e_machine 003e
@@ -185,7 +301,8 @@ A POSIX/host-side C test suite covers the ZIP engine and runs on any Linux / mac
 cd tests && bash run-tests.sh
 ```
 
-Output is a per-case `check`-style report — **69 checks** on the current `main`. Coverage:
+Output is a per-case `check`-style report — **83 checks** on the current `main`
+(69 ZIP + 14 RAR). Coverage:
 
 - ZIP entry parsing (stored + deflated + ZIP64)
 - Path traversal, absolute paths, backslash, Windows drive letters
@@ -194,29 +311,43 @@ Output is a per-case `check`-style report — **69 checks** on the current `main
 - Conflict policies: `fail` / `overwrite` / `merge`
 - Cancellation in every phase
 - **Large-file profile** — `medium_bomb.zip` (ratio ≈ 238) is rejected under default caps and accepted under large caps; lowered large caps still enforce.
+- **RAR engine** (`tests/test_rar_extract.c`, 14 checks) — format
+  dispatch (renamed ZIP rejected, junk blob rejected), error translation
+  across every reachable `DMC_UNRAR_*` code, limits handoff (the
+  `large=1` opt-in flows into `rar_extract()` unchanged).
 
 ## Project layout
 
 ```
 .
-├── Makefile                      # PS5 + Linux builds
+├── Makefile                      # PS5 + Linux builds (VERSION_TAG v1.8)
 ├── install-libmicrohttpd.sh      # one-shot dependency installer
 ├── gen-asset-module.py           # embeds assets/* as gzip-compressed C arrays
 ├── assets/                       # HTML / CSS / JS / icons / param.json
 ├── src/                          # C payload sources
 │   ├── main.c  websrv.c  filemgr.c        # entry, HTTP frontend, task model
 │   ├── upload.c  download.c               # stream handlers
-│   ├── extract.c  zip_extract.{c,h}       # /api/extract + standalone engine
+│   ├── extract.c                          # /api/extract dispatcher (ZIP + RAR)
+│   ├── zip_extract.{c,h}                  # ZIP engine (v1.7)
+│   ├── rar_extract.{c,h}                  # RAR engine (v1.8, dmc_unrar backend)
 │   └── app_installer.c                    # PS5 Media launcher installer
-├── third_party/                  # vendored: zlib, minizip-ng
+├── third_party/                  # vendored: zlib, minizip-ng, dmc_unrar
+│   └── unrar/
+│       ├── dmc_unrar.c                    # GPL-2.0-or-later, verbatim upstream
+│       └── dmc_unrar_api.h                # project-authored facade header
 ├── tests/                        # POSIX/host test suite
 │   ├── test_zip_extract.c
+│   ├── test_rar_extract.c        # 14 RAR negative-path checks (v1.8)
 │   ├── make_fixtures.py          # regenerate test fixtures
-│   ├── run-tests.sh              # one-shot runner
+│   ├── run-tests.sh              # one-shot runner (now runs ZIP + RAR suites)
 │   ├── compat/                   # tiny Win32/MSYS shims
-│   └── fixtures/                 # generated test ZIPs
-├── docs/screenshots/             # README screenshot images
-├── THIRD_PARTY_NOTICES           # bundled-library credits
+│   └── fixtures/                 # generated test ZIPs (and a couple of stub .rar blobs)
+├── docs/
+│   ├── HANDOVER.md               # engineering handover / dev playbook (also §14 v1.8 close-out)
+│   ├── UPGRADE-v1.7-zip-large-file-profile.md
+│   ├── UPGRADE-v1.8-rar-support.md
+│   └── screenshots/             # README screenshot images
+├── THIRD_PARTY_NOTICES           # bundled-library credits (incl. dmc_unrar section)
 ├── LICENSE                       # GPLv3+
 └── README.md
 ```
@@ -237,7 +368,15 @@ Output is a per-case `check`-style report — **69 checks** on the current `main
 - **This is a homebrew app and should not intentionally modify system processes or kernel memory.** If you hit a kernel panic, make sure you are using a recent jailbreak method and ELF loader, or revert to the stable method you normally use.
 - **P2JB users** — if this payload triggers a kernel panic, avoid using it on that setup. Stability matters more than convenience when each retry is expensive.
 - **The preparing stage can take a while** when a folder contains many files — it sums folder size and checks free space, which helps avoid starting a copy / move / upload / download that cannot finish safely.
-- **`err_extract_entry_too_large`** — default ZIP caps are 64 GiB per entry / 200:1 ratio. Confirm the large-file prompt (appears for archives > 60 GiB on disk), shrink the archive, or pass `large=1` directly to the API.
+- **`err_extract_entry_too_large`** — default archive caps are 64 GiB per
+  entry / 200:1 ratio. Confirm the large-file prompt (appears for
+  archives > 60 GiB on disk), split the archive, or pass `large=1`
+  directly to the API.
+- **`err_extract_unsupported`** — the archive uses a feature the engine
+  cannot handle: encrypted ZIP, encrypted RAR, multi-volume RAR
+  (`.part02+.rar`), very-old RAR 1.4, RAR symlinks / FIFOs, or a file
+  that is neither `.zip` nor `.rar`. For RAR specifically the message
+  lists the failure cause and points the user back to a PC extractor.
 
 ## Credits
 
@@ -253,6 +392,7 @@ This project was built with reference to these projects:
 - **[ezremote](https://github.com/cy33hc/ps5-ezremote-client):** Preview PKG info. License: GPLv2.
 - **[zlib-ng/minizip-ng](https://github.com/zlib-ng/minizip-ng):** ZIP reader used by the `/api/extract` endpoint. Vendored under `third_party/minizip-ng/`. License: zlib.
 - **[zlib](https://www.zlib.net/):** Compression backend for minizip-ng. Vendored under `third_party/zlib/`. License: zlib.
+- **[DrMcCoy/dmc_unrar](https://github.com/DrMcCoy/dmc_unrar):** RAR reader used by the `/api/extract` endpoint. Vendored under `third_party/unrar/` as a single-file drop-in (`dmc_unrar.c`); the project-authored facade `dmc_unrar_api.h` carries the project's own licence. License: GPL-2.0-or-later — see `third_party/unrar/COPYING`.
 
 ## License
 
@@ -260,7 +400,17 @@ The project is distributed under **GPLv3 or later**, matching the GPLv3+ project
 
 Third-party projects retain their own licenses. Do not copy assets or source from the credited projects into another distribution without preserving the corresponding license notices.
 
-If distributing binaries, comply with the LGPL terms for `libmicrohttpd` in addition to this project's GPL license. The vendored `zlib` and `minizip-ng` sources are distributed under the zlib license; retain the copyright notices in `third_party/zlib/LICENSE` and `third_party/minizip-ng/LICENSE` when redistributing binaries built with this feature.
+If distributing binaries, comply with the LGPL terms for `libmicrohttpd`
+in addition to this project's GPL license. The vendored `zlib` and
+`minizip-ng` sources are distributed under the zlib license; retain the
+copyright notices in `third_party/zlib/LICENSE` and
+`third_party/minizip-ng/LICENSE` when redistributing binaries built
+with this feature. The vendored `dmc_unrar` (RAR engine) is distributed
+under the GPL-2.0-or-later; retain the copyright notice in
+`third_party/unrar/COPYING` and ship the corresponding sources when
+redistributing binaries built with v1.8 or later (the `web-file-mgr.elf`
+binary is already GPLv3+, so the additional source-disclosure
+requirement is the only practical effect).
 
 ## Disclaimer
 

@@ -4,10 +4,133 @@ All notable changes to **PS5 Web File Manager** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> Release artifact for v1.7:
-> `web-file-mgr.elf` — 427 656 bytes
-> sha256 `648e4a00afe52669846df52ee5342bab42ea10050d555d5a1d4fa602653f514b`
+> Release artifact for v1.8:
+> `web-file-mgr.elf` — size TBD (cross-compile runs in WSL — see `docs/HANDOVER.md`)
+> sha256 TBD
 > ELF class 64, little-endian, e_machine `0x003e` (x86_64-sie-ps5)
+>
+> Source delta vs v1.7: +2 vendored files (`third_party/unrar/dmc_unrar.c`,
+> `third_party/unrar/dmc_unrar_api.h`), +1 new source pair
+> (`src/rar_extract.{c,h}`), `src/extract.c` gains a dispatch layer.
+
+## [v1.8] — 2026-09-05
+
+**RAR extraction: single-volume RAR4 / RAR5 (unencrypted).**
+
+> ⚠️ Scope clarification — v1.8 ships **single-volume unencrypted RAR** only.
+> The original RAR wishlist (multi-volume `.partNN.rar`, encrypted RAR with
+> password UI) is **deferred to v1.9**; see `docs/UPGRADE-v1.8-rar-support.md`
+> and `third_party/unrar/VENDORED.md` for the rationale and the engine
+> upgrade path. ZIP behaviour and the large-file profile are unchanged.
+
+### Added
+
+- **`src/rar_extract.{c,h}`** — a new extraction engine that mirrors
+  `zip_extract`'s protocol exactly. Internally it wraps the vendored
+  `dmc_unrar` 1.7.0 (`third_party/unrar/dmc_unrar.c`). The public entry point
+  is `rar_extract(rar_path, dst_dir, conflict, limits, cancel, progress,
+  userdata, result)` — same signatures, same `zipx_status_t` codes, same
+  `zipx_result_t`, same `zipx_limits_t` profile lookup. ~1276 LOC
+  (`src/rar_extract.c`).
+- **`third_party/unrar/`**:
+  - `dmc_unrar.c` — vendored verbatim from upstream (11 598 LOC, ~365 KiB).
+    GPL-2.0-or-later, attributed in `THIRD_PARTY_NOTICES`.
+  - `dmc_unrar_api.h` — **project-authored facade header**. Re-declares only
+    the `dmc_unrar_*` symbols `rar_extract.c` actually uses, so the engine
+    can `#include "dmc_unrar_api.h"` instead of `#include "dmc_unrar.c"`.
+    This keeps the vendored `.c` compiling as its own translation unit and
+    avoids polluting dmc_unrar's struct / function names with any
+    build-system macros (see `tests/posix_compat.h`'s `wfm_open` /
+    `wfm_close` rename pattern — that conflict is what motivated the
+    facade). The facade carries the project's license; the library body
+    remains unmodified.
+  - `COPYING`, `README.md` — upstream GPL notice + readme.
+  - `VENDORED.md` — explains why we chose `dmc_unrar` over rarlab UnRAR /
+    `opello/unrar`, what is and is not supported, and gives a step-by-step
+    upgrade plan for moving to a fuller C++ UnRAR in v1.9.
+- **`src/extract.c` dispatch layer** — `extract_dispatch()` picks the
+  engine by extension (`.zip` → `zipx_extract`, `.rar` → `rar_extract`,
+  anything else → `ZIPX_ERR_UNSUPPORTED`). The case-insensitive suffix
+  matcher trims trailing path separators. `extract_worker` now calls the
+  dispatch instead of going straight to the ZIP engine.
+- **Frontend + i18n wiring**:
+  - `assets/main.js` recognises `.rar` (single-volume) and `.part0*1.rar`
+    (multi-volume master) as extractable, greys out the extract button on
+    `.part02+.rar` sub-volumes with a tooltip "select the main volume
+    instead". This UX is only useful because v1.8 still rejects
+    multi-volume RAR with a friendly error — the visual feedback stops the
+    user from selecting a sub-volume and getting confused.
+  - `assets/lang-{en,zh}.js` `err_extract_unsupported` updated to:
+    "…(only unencrypted plain ZIP and single-volume RAR are supported)…".
+- **Host test suite** (`tests/test_rar_extract.c`, **14 checks**) —
+  negative paths only (format dispatch, error translation, limits
+  handoff). The suite is wired into `tests/run-tests.sh` alongside the
+  existing ZIP suite; fixture generation falls back to a placeholder
+  blob when no `rar` / `7z` writer is present, so the negative tests
+  fire on any host. Total host checks: **69 ZIP + 14 RAR = 83**.
+
+### Changed
+
+- **`Makefile`**:
+  - `VERSION_TAG := v1.8` (was `v1.7`).
+  - `THIRD_PARTY_SRCS` adds `third_party/unrar/dmc_unrar.c`.
+  - `THIRD_PARTY_CFLAGS` adds `-Ithird_party/unrar` and
+    `-DDMC_UNRAR_DISABLE_BE32TOH_BE64TOH=1` (dmc_unrar's own byte-swap
+    helpers are avoided so we don't need an extra `byteswap.h` shim on
+    the SDK).
+- **`src/extract.c` / `src/extract.h`** — no public-API break. The HTTP
+  surface (`POST /api/extract`) accepts the same fields as v1.7 plus
+  the existing `large=1`; there is **no** `password=` field because
+  v1.8 cannot decrypt. (The wire format is forward-compatible — a v1.9
+  `password=` field will be additive.)
+- **`THIRD_PARTY_NOTICES`** — adds a section `3. dmc_unrar` crediting
+  Sven Hesse (DrMcCoy), summarising the GPL-2.0-or-later obligations on
+  the resulting binary, and noting that `dmc_unrar_api.h` is
+  project-authored and licensed with the project.
+
+### Limitations (v1.8 scope)
+
+- **Multi-volume RAR** (`.part02+.rar`, `.part1+.rar`, numbered
+  continuations) is rejected with `ZIPX_ERR_UNSUPPORTED` and the error
+  message "extract on a PC first". Upstream dmc_unrar does not chain
+  companion volumes by design. When opello/unrar replaces dmc_unrar
+  in v1.9 this becomes a one-line error-code drop.
+- **Encrypted RAR** (any encrypted header / file flag) is rejected with
+  `ZIPX_ERR_UNSUPPORTED`. Same root cause — dmc_unrar omits decryption
+  to avoid patent complications. There is **no** password prompt in
+  the UI; there is **no** `password=` field in `/api/extract`.
+- **Symbolic links, FIFOs, sockets, devices** inside a RAR archive are
+  rejected with `ZIPX_ERR_SPECIAL` (mirrors ZIP behaviour).
+- **RAR 1.4** (very old) is not supported by dmc_unrar and is rejected
+  upstream with `DMC_UNRAR_ARCHIVE_VERSION_UNSUPPORTED`; the wrapper
+  maps that to `ZIPX_ERR_UNSUPPORTED`. RAR 1.5 through RAR 5.0 are
+  supported.
+
+### Verification
+
+```sh
+make                                                       # builds web-file-mgr.elf (in WSL)
+ls -la web-file-mgr.elf                                    # record size
+sha256sum web-file-mgr.elf                                 # record digest (paste into the v1.8 banner above)
+file  web-file-mgr.elf                                     # ELF 64-bit LSB pie, x86-64
+od -An -tx1 -N20 web-file-mgr.elf                         # 7f45 4c46 0201 + e_machine 003e
+
+(cd tests && bash run-tests.sh)                            # 69 + 14 = 83 checks, 0 failures
+
+python3 .build/check-elf-gzip.py ./web-file-mgr.elf        # 7/7 v1.7 keys + 1 v1.8 key (err_extract_unsupported)
+```
+
+### Technical notes
+
+A long-form technical write-up of this upgrade lives in
+[`docs/UPGRADE-v1.8-rar-support.md`](./docs/UPGRADE-v1.8-rar-support.md).
+The vendoring decision tree (and the v1.9 plan) is in
+[`third_party/unrar/VENDORED.md`](./third_party/unrar/VENDORED.md).
+
+### Credits
+
+Same as v1.7 — see [README.md → Credits](./README.md#credits). dmc_unrar
+is credited in [`THIRD_PARTY_NOTICES`](./THIRD_PARTY_NOTICES).
 
 ---
 
