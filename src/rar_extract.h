@@ -1,21 +1,22 @@
 #pragma once
 
 /* Safe RAR extraction engine used by the /api/extract task.
-   Wraps the vendored dmc_unrar library (https://github.com/DrMcCoy/dmc_unrar).
+   Wraps the vendored rarlab UnRAR 7.20.1 (third_party/unrar7) through its
+   C-compatible DLL API (unrar_c_api.h facade).
 
    Reuses the zip_extract types so the dispatch layer can call either engine
    through the same status / limits / progress protocol.
 
    See zip_extract.h for the shared limits, conflict, progress and result types.
 
-   Constraints of v1.8 (dmc_unrar 1.7.0 backend):
-     * Single-volume RAR archives only. Multi-volume (.partNN.rar) archives
-       are rejected with ZIPX_ERR_UNSUPPORTED — extract them on a PC first.
-     * Unencrypted RAR only. Encrypted headers / files are rejected with
-       ZIPX_ERR_UNSUPPORTED. There is no password argument for the same reason.
+   Backend notes (v1.9, unrar 7.20.1):
+     * RAR4 and RAR5, any compression version including WinRAR 6/7 "v6".
+     * Multi-volume: unrar merges next .partNN.rar by name automatically.
+     * Encrypted RAR is NOT yet supported end-to-end: the engine can decrypt
+       via RARSetPassword, but password plumbing (API + UI) is unwired, so
+       encrypted headers/entries fail with ZIPX_ERR_UNSUPPORTED today.
 
-   See third_party/unrar/VENDORED.md for the upgrade path to rarlab UnRAR
-   (which does support both) when / if it becomes worth the C++ integration. */
+   See third_party/unrar7/VENDORED.md for full integration notes. */
 
 #include "zip_extract.h"
 

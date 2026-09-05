@@ -35,22 +35,57 @@ ASSETS      := $(filter-out assets/icon0.png,$(BASE_ASSETS))
 endif
 GEN_SRCS    := $(patsubst assets/%,gen/%, $(ASSETS:=.c))
 
-# Vendored third-party: zlib + minizip-ng (ZIP), dmc_unrar (RAR). Compiled with
-# relaxed warnings (-w) — these are not our code and we do not want to chase
-# upstream style updates on every SDK upgrade.
-THIRD_PARTY_SRCS   := $(wildcard third_party/zlib/src/*.c) $(wildcard third_party/minizip-ng/src/*.c) third_party/unrar/dmc_unrar.c
-THIRD_PARTY_CFLAGS := -O2 -w -Ithird_party/zlib/include -Ithird_party/minizip-ng/include -Ithird_party/unrar \
-  -DHAVE_ZLIB -DZLIB_COMPAT -DHAVE_UNISTD_H=1 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE \
-  -DDMC_UNRAR_DISABLE_BE32TOH_BE64TOH=1
-PS5_TP_OBJS   := $(patsubst %.c,ps5-obj/%.o,$(THIRD_PARTY_SRCS))
-LINUX_TP_OBJS := $(patsubst %.c,linux-obj/%.o,$(THIRD_PARTY_SRCS))
+# Vendored third-party: zlib + minizip-ng (ZIP, C) and unrar 7.20.1 (RAR,
+# C++). unrar sources are compiled as a static library in RARDLL mode (no
+# main()); the project talks to it through the extern "C" DLL API in
+# third_party/unrar7/unrar_c_api.h. Compiled with relaxed warnings (-w) —
+# these are not our code and we do not want to chase upstream style updates.
+#
+# C++ compilers: PS5 uses prospero-clang++ (FreeBSD-style sysroot; the
+# toolchain defaults to -stdlib=libc++, driver links libc++ automatically);
+# host builds use the plain host C++ compiler (libstdc++).
+CXX            ?= $(dir $(CC))prospero-clang++
+HOST_CXX       ?= c++
 
-CFLAGS := -Oz -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Werror -ffunction-sections -fdata-sections -Isrc -Ithird_party/minizip-ng/include -Ithird_party/unrar -DVERSION_TAG=\"$(VERSION_TAG)\" -DTITLE_ID=\"$(TITLE_ID)\"
+# Source set mirrors UnRARDll.vcxproj's ClCompile list (49 files).
+UNRAR7_SRCS := \
+  third_party/unrar7/archive.cpp third_party/unrar7/arcread.cpp third_party/unrar7/blake2s.cpp \
+  third_party/unrar7/cmddata.cpp third_party/unrar7/consio.cpp third_party/unrar7/crc.cpp \
+  third_party/unrar7/crypt.cpp third_party/unrar7/dll.cpp third_party/unrar7/encname.cpp \
+  third_party/unrar7/errhnd.cpp third_party/unrar7/extinfo.cpp third_party/unrar7/extract.cpp \
+  third_party/unrar7/filcreat.cpp third_party/unrar7/file.cpp third_party/unrar7/filefn.cpp \
+  third_party/unrar7/filestr.cpp third_party/unrar7/find.cpp third_party/unrar7/getbits.cpp \
+  third_party/unrar7/global.cpp third_party/unrar7/hash.cpp third_party/unrar7/headers.cpp \
+  third_party/unrar7/isnt.cpp third_party/unrar7/largepage.cpp third_party/unrar7/match.cpp \
+  third_party/unrar7/motw.cpp third_party/unrar7/options.cpp third_party/unrar7/pathfn.cpp \
+  third_party/unrar7/qopen.cpp third_party/unrar7/rar.cpp third_party/unrar7/rarpch.cpp \
+  third_party/unrar7/rarvm.cpp third_party/unrar7/rawread.cpp third_party/unrar7/rdwrfn.cpp \
+  third_party/unrar7/rijndael.cpp third_party/unrar7/rs.cpp third_party/unrar7/rs16.cpp \
+  third_party/unrar7/scantree.cpp third_party/unrar7/secpassword.cpp third_party/unrar7/sha1.cpp \
+  third_party/unrar7/sha256.cpp third_party/unrar7/smallfn.cpp third_party/unrar7/strfn.cpp \
+  third_party/unrar7/strlist.cpp third_party/unrar7/system.cpp third_party/unrar7/threadpool.cpp \
+  third_party/unrar7/timefn.cpp third_party/unrar7/ui.cpp third_party/unrar7/unicode.cpp \
+  third_party/unrar7/unpack.cpp third_party/unrar7/volume.cpp
+
+THIRD_PARTY_C_SRCS   := $(wildcard third_party/zlib/src/*.c) $(wildcard third_party/minizip-ng/src/*.c)
+THIRD_PARTY_C_FLAGS  := -O2 -w -Ithird_party/zlib/include -Ithird_party/minizip-ng/include \
+  -DHAVE_ZLIB -DZLIB_COMPAT -DHAVE_UNISTD_H=1 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE
+UNRAR7_CXX_FLAGS     := -O2 -w -std=c++17 -DRARDLL -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
+# prospero-clang++ defaults to -stdlib=libc++; state it explicitly for clarity.
+UNRAR7_CXX_FLAGS_PS5 := $(UNRAR7_CXX_FLAGS) -stdlib=libc++
+UNRAR7_CXX_FLAGS_HOST:= $(UNRAR7_CXX_FLAGS)
+
+PS5_TP_OBJS   := $(patsubst %.c,ps5-obj/%.o,$(THIRD_PARTY_C_SRCS)) \
+                 $(patsubst %.cpp,ps5-obj/%.o,$(UNRAR7_SRCS))
+LINUX_TP_OBJS := $(patsubst %.c,linux-obj/%.o,$(THIRD_PARTY_C_SRCS)) \
+                 $(patsubst %.cpp,linux-obj/%.o,$(UNRAR7_SRCS))
+
+CFLAGS := -Oz -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Werror -ffunction-sections -fdata-sections -Isrc -Ithird_party/minizip-ng/include -Ithird_party/unrar7 -DVERSION_TAG=\"$(VERSION_TAG)\" -DTITLE_ID=\"$(TITLE_ID)\"
 CFLAGS += `$(PKG_CONFIG) libmicrohttpd --cflags`
 LDFLAGS := -Wl,--gc-sections
 LDADD  := `$(PKG_CONFIG) libmicrohttpd --libs`
 LDADD  += -lSceIpmi -lSceAppInstUtil -lSceUserService
-LINUX_CFLAGS := -O2 -flto -Wall -Werror -Isrc -Ithird_party/minizip-ng/include -DVERSION_TAG=\"$(VERSION_TAG)\" -DTITLE_ID=\"$(TITLE_ID)\"
+LINUX_CFLAGS := -O2 -flto -Wall -Werror -Isrc -Ithird_party/minizip-ng/include -Ithird_party/unrar7 -DVERSION_TAG=\"$(VERSION_TAG)\" -DTITLE_ID=\"$(TITLE_ID)\"
 LINUX_CFLAGS += `$(HOST_PKG_CONFIG) libmicrohttpd --cflags`
 LINUX_LDADD := `$(HOST_PKG_CONFIG) libmicrohttpd --libs` -pthread
 
@@ -78,16 +113,26 @@ gen/%.c: assets/% gen-asset-module.py | gen
 
 ps5-obj/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(THIRD_PARTY_CFLAGS) -c -o $@ $<
+	$(CC) $(THIRD_PARTY_C_FLAGS) -c -o $@ $<
 
 linux-obj/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(THIRD_PARTY_CFLAGS) -c -o $@ $<
+	$(HOST_CC) $(THIRD_PARTY_C_FLAGS) -c -o $@ $<
 
+ps5-obj/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(UNRAR7_CXX_FLAGS_PS5) -c -o $@ $<
+
+linux-obj/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(HOST_CXX) $(UNRAR7_CXX_FLAGS_HOST) -c -o $@ $<
+
+# Link with the C++ driver so libc++ (PS5) / libstdc++ (host) is pulled in
+# automatically for the unrar objects.
 $(BIN): $(PS5_SRCS) $(GEN_SRCS) $(PS5_TP_OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(filter %.c,$^) $(PS5_TP_OBJS) $(LDADD)
+	$(CXX) $(CFLAGS) $(LDFLAGS) -o $@ $(filter %.c,$^) $(PS5_TP_OBJS) $(LDADD)
 	$(STRIP) $@
 
 $(LINUX_BIN): $(LINUX_SRCS) $(GEN_SRCS) $(LINUX_TP_OBJS)
-	$(HOST_CC) $(LINUX_CFLAGS) -o $@ $(filter %.c,$^) $(LINUX_TP_OBJS) $(LINUX_LDADD)
+	$(HOST_CXX) $(LINUX_CFLAGS) -o $@ $(filter %.c,$^) $(LINUX_TP_OBJS) $(LINUX_LDADD)
 	$(HOST_STRIP) $@

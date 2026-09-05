@@ -1,18 +1,26 @@
 /* Safe RAR extraction engine used by the /api/extract task.
-   Wraps the vendored dmc_unrar library (https://github.com/DrMcCoy/dmc_unrar).
+   Wraps the vendored rarlab UnRAR 7.x library (third_party/unrar7) through
+   its C-compatible DLL API (dll.hpp / unrar_c_api.h facade).
 
    The publish / staging / rollback / normalize-name / dedup machinery is
    mirrored from zip_extract.c so that any consumer of zipx_result_t gets a
    consistent error and progress contract regardless of archive format.
 
-   See third_party/unrar/VENDORED.md for what dmc_unrar does and does not
-   support (single-volume RAR only; multi-volume and encrypted are
-   rejected up front). */
+   Backend notes (v1.9, unrar 7.20.1):
+     * RAR4 and RAR5 (any compression version, incl. WinRAR 6/7 "v6")
+       single-volume archives.
+     * Multi-volume archives: unrar auto-merges subsequent volumes by name
+       pattern when all .partNN.rar files sit next to the opened volume.
+     * Encrypted RAR: the engine can decrypt via RARSetPassword, but the
+       password plumbing (API + UI) is not wired yet — encrypted archives
+       currently fail with ZIPX_ERR_UNSUPPORTED.
+
+   See third_party/unrar7/VENDORED.md for the full integration notes. */
 
 #include "rar_extract.h"
 #include "zip_extract.h"  /* for the shared status / progress / limits API */
 
-#include "dmc_unrar_api.h"  /* facade — links against dmc_unrar.o at build time */
+#include "unrar_c_api.h"  /* facade — links against the unrar7 static lib at build time */
 
 #include <dirent.h>
 #include <errno.h>
@@ -28,11 +36,11 @@
 #include <time.h>
 #include <unistd.h>
 
-/* (intentionally no `#include "dmc_unrar.c"` here — that would pull the
-   library into this translation unit, where the host test build's
-   tests/posix_compat.h renames `open` / `close` to `wfm_open` / `wfm_close`
-   and breaks dmc_unrar's `dmc_unrar_io_handler` struct member access.
-   dmc_unrar.c is compiled as its own translation unit and joined at link.) */
+/* (intentionally no `#include "rar.hpp"` etc. here — those are C++ headers.
+   rar_extract.c talks to unrar exclusively through the extern "C" DLL API in
+   dll.hpp, and the unrar sources are compiled as their own translation units
+   (RARDLL mode) and joined at link time. This keeps the host test build's
+   tests/posix_compat.h renames (open->wfm_open) from leaking into unrar.) */
 
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
@@ -288,7 +296,7 @@ nameset_put(rarx_nameset_t *set, uint64_t h, int is_dir) {
 /**************************************************************************
  * entry name validation (mirrors zip_extract.c::normalize_name but the
  * RAR side does not have a trailing separator, so dir entries are only
- * detected via dmc_unrar_file_is_directory()).
+ * detected via the RHDF_DIRECTORY header flag).
  **************************************************************************/
 
 static int
@@ -300,7 +308,11 @@ normalize_name(const char *in, char *out, size_t out_size, int *is_dir,
   size_t seg_len = 0;
   uint32_t levels = 0;
 
-  *is_dir = 0;
+  /* NOTE: is_dir is owned by the caller — unrar announces directories via
+     the RHDF_DIRECTORY header flag, not via a trailing separator, so we
+     must NOT clear it here (a stray `*is_dir = 0` previously turned every
+     directory entry into a file and tripped the duplicate detector when an
+     explicit directory header followed files beneath it). */
   *depth = 0;
   if(!in_len) {
     return rarx_fail(c, ZIPX_ERR_UNSAFE_NAME, in, "empty entry name");
@@ -422,77 +434,46 @@ nameset_check_duplicate(rarx_nameset_t *set, const char *name, int is_dir,
 }
 
 /**************************************************************************
- * dmc_unrar -> zipx error translation
+ * unrar DLL error -> zipx error translation
  **************************************************************************/
 
 static int
-rar_translate_error(dmc_unrar_return code, const char *detail,
-                    rarx_ctx_t *c) {
+rar_translate_error(int code, const char *detail, rarx_ctx_t *c) {
   switch(code) {
-  case DMC_UNRAR_OK:
+  case ERAR_SUCCESS:
     return ZIPX_OK;
 
-  /* Archive-open level (the user will see this when they upload a
-     multi-volume or fully-encrypted RAR — let them know it is on purpose). */
-  case DMC_UNRAR_ARCHIVE_UNSUPPORTED_VOLUMES:
-    return rarx_fail(c, ZIPX_ERR_UNSUPPORTED, detail,
-                     "multi-volume RAR archives are not supported; "
-                     "please extract on a PC first");
+  /* The unrar engine handles multi-volume automatically (it merges the
+     next .partNN.rar by name); a missing next volume surfaces as EOPEN. */
+  case ERAR_EOPEN:
+    return rarx_fail(c, ZIPX_ERR_OPEN, detail, "%s", strerror(errno));
 
-  case DMC_UNRAR_ARCHIVE_UNSUPPORTED_ENCRYPTED:
-    return rarx_fail(c, ZIPX_ERR_UNSUPPORTED, detail,
-                     "encrypted RAR archives are not supported; "
-                     "please extract on a PC first");
+  case ERAR_ECREATE:
+  case ERAR_ECLOSE:
+  case ERAR_EREAD:
+  case ERAR_EWRITE:
+    return rarx_fail(c, ZIPX_ERR_IO, detail, "%s", strerror(errno));
 
-  /* Per-file (still surfaced up-front during scan). */
-  case DMC_UNRAR_FILE_UNSUPPORTED_ENCRYPTED:
+  case ERAR_MISSING_PASSWORD:
+  case ERAR_BAD_PASSWORD:
+    /* Password plumbing (API + UI) is not wired yet. */
     return rarx_fail(c, ZIPX_ERR_UNSUPPORTED, detail,
                      "encrypted RAR entries are not supported");
 
-  case DMC_UNRAR_FILE_UNSUPPORTED_SPLIT:
-    return rarx_fail(c, ZIPX_ERR_UNSUPPORTED, detail,
-                     "split RAR entries are not supported");
+  case ERAR_SMALL_BUF:
+    return rarx_fail(c, ZIPX_ERR_LIMIT_NAME, detail, "name buffer is too small");
 
-  case DMC_UNRAR_FILE_UNSUPPORTED_LINK:
-    return rarx_fail(c, ZIPX_ERR_SPECIAL, detail, "symbolic link entry");
-
-  case DMC_UNRAR_FILE_UNSUPPORTED_VERSION:
-  case DMC_UNRAR_FILE_UNSUPPORTED_METHOD:
-    return rarx_fail(c, ZIPX_ERR_UNSUPPORTED, detail,
-                     "RAR entry uses an unsupported compression method");
-
-  case DMC_UNRAR_FILE_UNSUPPORTED_LARGE:
+  case ERAR_LARGE_DICT:
     return rarx_fail(c, ZIPX_ERR_LIMIT_FILE, detail,
-                     "RAR entry is larger than the supported maximum");
+                     "archive needs a larger dictionary than supported");
 
-  case DMC_UNRAR_ARCHIVE_EMPTY:
-    return rarx_fail(c, ZIPX_ERR_FORMAT, detail, "empty RAR archive");
+  case ERAR_BAD_DATA:
+    return rarx_fail(c, ZIPX_ERR_CRC, detail, "checksum mismatch in entry data");
 
-  case DMC_UNRAR_ARCHIVE_UNSUPPORTED_ANCIENT:
-    return rarx_fail(c, ZIPX_ERR_UNSUPPORTED, detail,
-                     "RAR 1.4 / 1.5 archives are not supported");
-
-  case DMC_UNRAR_ARCHIVE_NOT_RAR:
-    return rarx_fail(c, ZIPX_ERR_FORMAT, detail,
-                     "not a RAR archive");
-
-  case DMC_UNRAR_OPEN_FAIL:
-    return rarx_fail(c, ZIPX_ERR_OPEN, detail, "%s", strerror(errno));
-
-  case DMC_UNRAR_READ_FAIL:
-  case DMC_UNRAR_WRITE_FAIL:
-  case DMC_UNRAR_SEEK_FAIL:
-    return rarx_fail(c, ZIPX_ERR_IO, detail, "%s", strerror(errno));
-
-  case DMC_UNRAR_FILE_CRC32_FAIL:
-    return rarx_fail(c, ZIPX_ERR_CRC, detail, "CRC32 mismatch");
-
-  case DMC_UNRAR_INVALID_DATA:
-  case DMC_UNRAR_NO_ALLOC:
-  case DMC_UNRAR_ALLOC_FAIL:
-  case DMC_UNRAR_ARCHIVE_IS_NULL:
-  case DMC_UNRAR_ARCHIVE_NOT_CLEARED:
-  case DMC_UNRAR_ARCHIVE_MISSING_FIELDS:
+  case ERAR_BAD_ARCHIVE:
+  case ERAR_UNKNOWN_FORMAT:
+  case ERAR_UNKNOWN:
+  case ERAR_NO_MEMORY:
   default:
     return rarx_fail(c, ZIPX_ERR_FORMAT, detail,
                      "invalid or corrupt RAR archive");
@@ -530,15 +511,6 @@ path_parent(const char *path, char *out, size_t out_size) {
   memcpy(out, path, i);
   out[i] = 0;
   return 0;
-}
-
-static void
-chmod_0777_fd(int fd) {
-  int err = errno;
-
-  if(fchmod(fd, 0777)) {
-    errno = err;
-  }
 }
 
 static int
@@ -617,57 +589,6 @@ rollback_published(rarx_ctx_t *c) {
   }
 }
 
-/* mkdir -p: ensures every segment below root_fd exists. Returns the open
-   descriptor for the deepest directory. */
-static int
-open_parent_dirs(int root_fd, const char *rel, rarx_ctx_t *c) {
-  char buf[ZIPX_PATH_MAX];
-  int fd = root_fd;
-  char *seg;
-  char *save = NULL;
-
-  if(strlen(rel) >= sizeof(buf)) {
-    rarx_fail(c, ZIPX_ERR_LIMIT_NAME, rel, "path is too long");
-    return -1;
-  }
-  strcpy(buf, rel);
-
-  for(seg = strtok_r(buf, "/", &save); seg; seg = strtok_r(NULL, "/", &save)) {
-    int next;
-
-    if(!mkdirat(fd, seg, 0777)) {
-      next = openat(fd, seg, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-      if(next >= 0) {
-        chmod_0777_fd(next);
-        c->dirs_created++;
-      }
-    } else if(errno == EEXIST) {
-      next = openat(fd, seg, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-    } else {
-      rarx_fail(c, ZIPX_ERR_IO, rel, "cannot create directory '%s': %s", seg,
-               strerror(errno));
-      if(fd != root_fd) {
-        close(fd);
-      }
-      return -1;
-    }
-
-    if(next < 0) {
-      rarx_fail(c, ZIPX_ERR_IO, rel, "cannot open directory '%s': %s", seg,
-               strerror(errno));
-      if(fd != root_fd) {
-        close(fd);
-      }
-      return -1;
-    }
-    if(fd != root_fd) {
-      close(fd);
-    }
-    fd = next;
-  }
-  return fd;
-}
-
 /**************************************************************************
  * scan phase
  **************************************************************************/
@@ -695,74 +616,55 @@ check_space(rarx_ctx_t *c, const char *target) {
 }
 
 static int
-scan_archive(dmc_unrar_archive *rar, rarx_ctx_t *c) {
+scan_archive(HANDLE hArc, rarx_ctx_t *c) {
   rarx_nameset_t set;
-  dmc_unrar_size_t i;
-  dmc_unrar_size_t total;
   int ret = 0;
 
   if(nameset_init(&set, 4096)) {
     return rarx_fail(c, ZIPX_ERR_INTERNAL, NULL, "out of memory");
   }
 
-  total = dmc_unrar_get_file_count(rar);
-  for(i = 0; i < total; i++) {
+  for(;;) {
+    struct RARHeaderDataEx hdr;
+    uint64_t uncomp;
     char name[ZIPX_PATH_MAX];
-    char *name_buf;
-    dmc_unrar_size_t name_size;
     int is_dir;
     uint32_t depth = 0;
-    const dmc_unrar_file *info;
-    dmc_unrar_return supported;
+    int rc;
 
-    info = dmc_unrar_get_file_stat(rar, i);
-    if(!info) {
-      ret = rarx_fail(c, ZIPX_ERR_FORMAT, NULL, "cannot read entry header");
+    memset(&hdr, 0, sizeof(hdr));
+    rc = RARReadHeaderEx(hArc, &hdr);
+    if(rc == ERAR_END_ARCHIVE) {
       break;
     }
-    supported = dmc_unrar_file_is_supported(rar, i);
-    if(supported != DMC_UNRAR_OK) {
-      /* is_supported() already returns ZIPX-mapped error via a temporary */
-      char detail[64];
-      snprintf(detail, sizeof(detail), "entry %llu",
-               (unsigned long long)i);
-      rarx_fail(c, ZIPX_ERR_UNSUPPORTED, detail, "%s",
-                dmc_unrar_strerror(supported));
-      ret = (int)c->result->status;
-      break;
-    }
-    is_dir = dmc_unrar_file_is_directory(rar, i) ? 1 : 0;
-
-    /* First call to learn the required size, second to fill the buffer. */
-    name_size = dmc_unrar_get_filename(rar, i, NULL, 0);
-    if(!name_size) {
-      ret = rarx_fail(c, ZIPX_ERR_FORMAT, NULL,
-                      "cannot read entry name");
-      break;
-    }
-    name_buf = malloc(name_size);
-    if(!name_buf) {
-      ret = rarx_fail(c, ZIPX_ERR_INTERNAL, NULL, "out of memory");
-      break;
-    }
-    if(dmc_unrar_get_filename(rar, i, name_buf, name_size) != name_size) {
-      free(name_buf);
-      ret = rarx_fail(c, ZIPX_ERR_FORMAT, NULL,
-                      "truncated entry name");
-      break;
-    }
-    /* dmc_unrar does not guarantee NUL termination; force it. */
-    name_buf[name_size - 1] = 0;
-    /* RAR stores UTF-8 encoded names. Replace any non-UTF-8 sequence with
-       '?' to keep the downstream string well-formed. */
-    dmc_unrar_unicode_make_valid_utf8(name_buf);
-
-    if(normalize_name(name_buf, name, sizeof(name), &is_dir, &depth, c)) {
-      free(name_buf);
+    if(rc != ERAR_SUCCESS) {
+      rar_translate_error(rc, NULL, c);
       ret = -1;
       break;
     }
-    free(name_buf);
+
+    /* unrar hands out the header name as a NUL-terminated string
+       (UTF-8 on the PS5 / POSIX build). */
+    if(hdr.FileName[0] == 0) {
+      ret = rarx_fail(c, ZIPX_ERR_FORMAT, NULL, "empty entry name");
+      break;
+    }
+    is_dir = (hdr.Flags & RHDF_DIRECTORY) ? 1 : 0;
+
+    /* Encrypted entries: the unrar engine can decrypt them via RARSetPassword,
+       but the password plumbing is not wired yet — reject up front with the
+       same message the v1.8 backend used. */
+    if(hdr.Flags & RHDF_ENCRYPTED) {
+      ret = rarx_fail(c, ZIPX_ERR_UNSUPPORTED, hdr.FileName,
+                      "encrypted RAR entries are not supported");
+      break;
+    }
+
+    if(normalize_name(hdr.FileName, name, sizeof(name), &is_dir, &depth, c)) {
+      ret = -1;
+      break;
+    }
+    (void)depth;
 
     if(nameset_check_duplicate(&set, name, is_dir, c) ||
        nameset_add_path(&set, name, is_dir, c)) {
@@ -771,7 +673,7 @@ scan_archive(dmc_unrar_archive *rar, rarx_ctx_t *c) {
     }
 
     if(!is_dir) {
-      uint64_t uncomp = info->uncompressed_size;
+      uncomp = (uint64_t)hdr.UnpSizeHigh << 32 | hdr.UnpSize;
 
       if(uncomp > c->limits.max_file_bytes) {
         ret = rarx_fail(c, ZIPX_ERR_LIMIT_FILE, name,
@@ -779,8 +681,6 @@ scan_archive(dmc_unrar_archive *rar, rarx_ctx_t *c) {
                        (unsigned long long)c->limits.max_file_bytes);
         break;
       }
-      /* RAR headers do not reliably expose compressed_size for all formats,
-         so the safe compression-ratio check is skipped. */
       if(uncomp >= c->limits.max_total_bytes ||
          c->bytes_total > c->limits.max_total_bytes - uncomp) {
         ret = rarx_fail(c, ZIPX_ERR_LIMIT_TOTAL, name,
@@ -805,6 +705,17 @@ scan_archive(dmc_unrar_archive *rar, rarx_ctx_t *c) {
       }
       report(c, ZIPX_PHASE_SCAN, name, 0);
     }
+
+    /* Advance to the next file header (also drives multi-volume merges). */
+    rc = RARProcessFile(hArc, RAR_SKIP, NULL, NULL);
+    if(rc != ERAR_SUCCESS) {
+      if(rc != ERAR_END_ARCHIVE) {
+        ret = -1;
+        rar_translate_error(rc, name, c);
+        break;
+      }
+      break;
+    }
   }
 
   nameset_free(&set);
@@ -815,175 +726,60 @@ scan_archive(dmc_unrar_archive *rar, rarx_ctx_t *c) {
  * extract phase
  **************************************************************************/
 
-/* dmc_unrar_extract_file_to_path() opens the destination file with fopen()
-   without creating parent directories. We always call it against an
-   already-prepared full path inside the staging tree. */
+/* unrar extracts each entry directly under the staging root and creates
+   parent directories itself. All entry names were validated (normalize_name)
+   during scan, so what lands in the staging tree is safe by construction. */
 static int
-extract_one(dmc_unrar_archive *rar, rarx_ctx_t *c, int root_fd,
-            const char *name, dmc_unrar_size_t index, uint64_t declared) {
-  char *full_path;
-  char dir_part[ZIPX_PATH_MAX];
-  char base[ZIPX_PATH_MAX];
-  char *slash;
-  int dir_fd;
-  dmc_unrar_return dr;
-  struct stat st;
-  uint64_t before_bytes;
+extract_archive(HANDLE hArc, rarx_ctx_t *c) {
   int ret = 0;
 
-  snprintf(dir_part, sizeof(dir_part), "%s", name);
-  slash = strrchr(dir_part, '/');
-  if(slash) {
-    snprintf(base, sizeof(base), "%s", slash + 1);
-    *slash = 0;
-  } else {
-    snprintf(base, sizeof(base), "%s", name);
-    dir_part[0] = 0;
-  }
-  if(!base[0]) {
-    return rarx_fail(c, ZIPX_ERR_UNSAFE_NAME, name, "empty file name");
-  }
-
-  dir_fd = open_parent_dirs(root_fd, dir_part, c);
-  if(dir_fd < 0) {
-    return -1;
-  }
-
-  full_path = malloc(ZIPX_PATH_MAX);
-  if(!full_path) {
-    rarx_fail(c, ZIPX_ERR_INTERNAL, name, "out of memory");
-    if(dir_fd != root_fd) {
-      close(dir_fd);
-    }
-    return -1;
-  }
-  if(dir_part[0]) {
-    snprintf(full_path, ZIPX_PATH_MAX, "%s/%s/%s",
-             c->staging, dir_part, base);
-  } else {
-    snprintf(full_path, ZIPX_PATH_MAX, "%s/%s", c->staging, base);
-  }
-
-  before_bytes = c->bytes_done;
-  dr = dmc_unrar_extract_file_to_path(rar, index, full_path, NULL, true);
-  if(dr != DMC_UNRAR_OK) {
-    rar_translate_error(dr, name, c);
-    ret = -1;
-    goto done;
-  }
-
-  if(stat(full_path, &st)) {
-    rarx_fail(c, ZIPX_ERR_IO, name, "cannot stat extracted file: %s",
-              strerror(errno));
-    ret = -1;
-    goto done;
-  }
-  if((uint64_t)st.st_size > declared + declared + (64 * 1024)) {
-    /* Defensive: the on-disk size should never wildly exceed the declared
-       size. The cap is generous so PPMd + headers do not trip it. */
-    rarx_fail(c, ZIPX_ERR_LIMIT_FILE, name,
-              "extracted file is larger than declared");
-    unlink(full_path);
-    ret = -1;
-    goto done;
-  }
-  if((uint64_t)st.st_size > c->limits.max_total_bytes - c->bytes_done) {
-    rarx_fail(c, ZIPX_ERR_LIMIT_TOTAL, name,
-              "archive contents are larger than %llu bytes",
-              (unsigned long long)c->limits.max_total_bytes);
-    unlink(full_path);
-    ret = -1;
-    goto done;
-  }
-  c->bytes_done += (uint64_t)st.st_size;
-  /* If dmc_unrar did not advance bytes_done above (e.g. declared == 0 for a
-     directory or zero-byte file), credit the bytes_total estimate so the
-     progress bar keeps moving. */
-  if(c->bytes_done == before_bytes && declared) {
-    c->bytes_done += declared;
-  }
-
-done:
-  free(full_path);
-  if(dir_fd != root_fd) {
-    close(dir_fd);
-  }
-  if(!ret) {
-    c->files_created++;
-  }
-  return ret;
-}
-
-static int
-extract_archive(dmc_unrar_archive *rar, rarx_ctx_t *c, int root_fd) {
-  dmc_unrar_size_t i;
-  dmc_unrar_size_t total = dmc_unrar_get_file_count(rar);
-  int ret = 0;
-
-  for(i = 0; i < total && !ret; i++) {
-    char *name_buf = NULL;
-    dmc_unrar_size_t name_size;
-    char name[ZIPX_PATH_MAX];
+  for(;;) {
+    struct RARHeaderDataEx hdr;
+    int rc;
     int is_dir;
-    uint32_t depth = 0;
-    const dmc_unrar_file *info;
+
+    memset(&hdr, 0, sizeof(hdr));
+    rc = RARReadHeaderEx(hArc, &hdr);
+    if(rc == ERAR_END_ARCHIVE) {
+      break;
+    }
+    if(rc != ERAR_SUCCESS) {
+      rar_translate_error(rc, NULL, c);
+      ret = -1;
+      break;
+    }
 
     if(canceled(c)) {
       ret = rarx_fail(c, ZIPX_ERR_CANCELED, NULL, NULL);
       break;
     }
+    if(hdr.FileName[0] == 0) {
+      ret = rarx_fail(c, ZIPX_ERR_FORMAT, NULL, "empty entry name");
+      break;
+    }
+    if(hdr.Flags & RHDF_ENCRYPTED) {
+      /* scan already rejected these; defensive only. */
+      ret = rarx_fail(c, ZIPX_ERR_UNSUPPORTED, hdr.FileName,
+                      "encrypted RAR entries are not supported");
+      break;
+    }
 
-    info = dmc_unrar_get_file_stat(rar, i);
-    if(!info) {
-      ret = rarx_fail(c, ZIPX_ERR_FORMAT, NULL, "cannot read entry header");
-      break;
-    }
-    is_dir = dmc_unrar_file_is_directory(rar, i) ? 1 : 0;
-
-    name_size = dmc_unrar_get_filename(rar, i, NULL, 0);
-    if(!name_size) {
-      ret = rarx_fail(c, ZIPX_ERR_FORMAT, NULL, "cannot read entry name");
-      break;
-    }
-    name_buf = malloc(name_size);
-    if(!name_buf) {
-      ret = rarx_fail(c, ZIPX_ERR_INTERNAL, NULL, "out of memory");
-      break;
-    }
-    if(dmc_unrar_get_filename(rar, i, name_buf, name_size) != name_size) {
-      free(name_buf);
-      ret = rarx_fail(c, ZIPX_ERR_FORMAT, NULL, "truncated entry name");
-      break;
-    }
-    name_buf[name_size - 1] = 0;
-    dmc_unrar_unicode_make_valid_utf8(name_buf);
-
-    if(normalize_name(name_buf, name, sizeof(name), &is_dir, &depth, c)) {
-      free(name_buf);
+    is_dir = (hdr.Flags & RHDF_DIRECTORY) ? 1 : 0;
+    rc = RARProcessFile(hArc, RAR_EXTRACT, c->staging, NULL);
+    if(rc != ERAR_SUCCESS) {
+      rar_translate_error(rc, hdr.FileName, c);
       ret = -1;
       break;
     }
-    free(name_buf);
-    (void)depth;
 
     if(is_dir) {
-      int dir_fd = open_parent_dirs(root_fd, name, c);
-      if(dir_fd < 0) {
-        ret = -1;
-        break;
-      }
-      if(dir_fd != root_fd) {
-        close(dir_fd);
-      }
+      c->dirs_created++;
     } else {
-      uint64_t declared = info->uncompressed_size;
-      if(extract_one(rar, c, root_fd, name, i, declared)) {
-        ret = -1;
-        break;
-      }
+      c->files_created++;
+      c->bytes_done += (uint64_t)hdr.UnpSizeHigh << 32 | hdr.UnpSize;
     }
     c->entries_done++;
-    report(c, ZIPX_PHASE_EXTRACT, name, 0);
+    report(c, ZIPX_PHASE_EXTRACT, hdr.FileName, 0);
   }
   return ret;
 }
@@ -1151,9 +947,7 @@ rar_extract(const char *rar_path, const char *dst_dir,
   char parent[ZIPX_PATH_MAX];
   char dst_copy[ZIPX_PATH_MAX];
   struct stat st;
-  dmc_unrar_archive rar;
-  dmc_unrar_return dr;
-  int root_fd = -1;
+  HANDLE hArc = NULL;
   int dst_existed = 0;
   int status;
 
@@ -1197,49 +991,66 @@ rar_extract(const char *rar_path, const char *dst_dir,
     goto done;
   }
 
-  dr = dmc_unrar_archive_init(&rar);
-  if(dr != DMC_UNRAR_OK) {
-    status = rarx_fail(c, ZIPX_ERR_INTERNAL, rar_path,
-                       "cannot initialize RAR decoder");
-    goto done;
-  }
-  dr = dmc_unrar_archive_open_path(&rar, rar_path);
-  if(dr != DMC_UNRAR_OK) {
-    status = rar_translate_error(dr, rar_path, c);
-    goto done;
+  /* Open with RAR_OM_EXTRACT for both passes: the unrar engine drives
+     multi-volume merges identically while scanning (skip) and extracting,
+     and encrypted headers surface here as a missing/bad password. */
+  {
+    struct RAROpenArchiveDataEx od;
+    memset(&od, 0, sizeof(od));
+    od.ArcName = (char *)rar_path;
+    od.OpenMode = RAR_OM_EXTRACT;
+    hArc = RAROpenArchiveEx(&od);
+    if(!hArc) {
+      status = rar_translate_error((int)od.OpenResult, rar_path, c);
+      goto done;
+    }
   }
 
-  if(scan_archive(&rar, c)) {
+  if(scan_archive(hArc, c)) {
     status = (int)c->result->status;
+    RARCloseArchive(hArc);
+    hArc = NULL;
     goto done;
   }
   if(canceled(c)) {
     status = rarx_fail(c, ZIPX_ERR_CANCELED, NULL, NULL);
+    RARCloseArchive(hArc);
+    hArc = NULL;
     goto done;
   }
   if(check_space(c, dst_existed ? dst_copy : parent)) {
     status = (int)c->result->status;
+    RARCloseArchive(hArc);
+    hArc = NULL;
     goto done;
   }
   if(make_staging(c, parent)) {
     status = (int)c->result->status;
+    RARCloseArchive(hArc);
+    hArc = NULL;
     goto done;
   }
 
-  root_fd = open(c->staging, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-  if(root_fd < 0) {
-    status = rarx_fail(c, ZIPX_ERR_IO, c->staging, "cannot open staging: %s",
-                       strerror(errno));
-    goto done;
+  /* Pass 2: re-open and extract each entry straight into the staging tree
+     (unrar creates parent directories itself; names were validated during
+     scan). The staging root is pre-verified below for fast failure. */
+  RARCloseArchive(hArc);
+  hArc = NULL;
+  {
+    struct RAROpenArchiveDataEx od;
+    memset(&od, 0, sizeof(od));
+    od.ArcName = (char *)rar_path;
+    od.OpenMode = RAR_OM_EXTRACT;
+    hArc = RAROpenArchiveEx(&od);
+    if(!hArc) {
+      status = rar_translate_error((int)od.OpenResult, rar_path, c);
+      goto done;
+    }
   }
 
-  if(extract_archive(&rar, c, root_fd)) {
+  if(extract_archive(hArc, c)) {
     status = (int)c->result->status;
     goto done;
-  }
-  if(root_fd >= 0) {
-    close(root_fd);
-    root_fd = -1;
   }
   if(canceled(c)) {
     status = rarx_fail(c, ZIPX_ERR_CANCELED, NULL, NULL);
@@ -1254,11 +1065,10 @@ rar_extract(const char *rar_path, const char *dst_dir,
   status = ZIPX_OK;
 
 done:
-  if(root_fd >= 0) {
-    close(root_fd);
+  if(hArc) {
+    RARCloseArchive(hArc);
   }
   cleanup_staging(c);
-  dmc_unrar_archive_close(&rar);
   result->entries_total = c->entries_total;
   result->entries_done = c->entries_done;
   result->bytes_total = c->bytes_total;

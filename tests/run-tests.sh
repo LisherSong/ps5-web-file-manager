@@ -39,9 +39,19 @@ for src in "$ROOT"/third_party/zlib/src/*.c "$ROOT"/third_party/minizip-ng/src/*
     "${MZ_CFLAGS[@]}" "${extra[@]}" -o "$BUILD/$name.o" "$src"
 done
 
-# dmc_unrar (single-file; uses stdio fopen by default on non-Windows)
-"$CC" -c -O2 -w "${RAR_CFLAGS[@]}" \
-  -o "$BUILD/dmc_unrar.o" "$ROOT/third_party/unrar/dmc_unrar.c"
+# unrar 7.20.1 (RARDLL source set; compiled with the host C++ compiler).
+UNRAR7_SRCS="$ROOT/third_party/unrar7"
+UNRAR7_CFLAGS=(-O2 -w -std=c++17 -DRARDLL -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE)
+CXX="${CXX:-g++}"
+for src in \
+  archive arcread blake2s cmddata consio crc crypt dll encname errhnd extinfo \
+  extract filcreat file filefn filestr find getbits global hash headers isnt \
+  largepage match motw options pathfn qopen rar rarpch rarvm rawread rdwrfn \
+  rijndael rs rs16 scantree secpassword sha1 sha256 smallfn strfn strlist \
+  system threadpool timefn ui unicode unpack volume; do
+  "$CXX" -c "${UNRAR7_CFLAGS[@]}" -o "$BUILD/unrar7_$src.o" \
+    "$UNRAR7_SRCS/$src.cpp" || exit 1
+done
 
 COMPAT_INC="$ROOT/tests/compat"
 
@@ -52,8 +62,8 @@ COMPAT_INC="$ROOT/tests/compat"
   -o "$BUILD/zip_extract.o" "$ROOT/src/zip_extract.c"
 
 "$CC" -c -O2 -Wall -Wextra -Wno-unused-parameter \
-  -I"$ROOT/third_party/minizip-ng/include" -I"$ROOT/src" -I"$COMPAT_INC" \
-  "${RAR_CFLAGS[@]}" -include "$ROOT/tests/posix_compat.h" \
+  -I"$ROOT/third_party/minizip-ng/include" -I"$ROOT/third_party/unrar7" -I"$ROOT/src" -I"$COMPAT_INC" \
+  -include "$ROOT/tests/posix_compat.h" \
   -o "$BUILD/rar_extract.o" "$ROOT/src/rar_extract.c"
 
 "$CC" -c -O2 -Wall -Wextra -Wno-unused-parameter -I"$ROOT/src" \
@@ -61,13 +71,15 @@ COMPAT_INC="$ROOT/tests/compat"
   -o "$BUILD/test_zip_extract.o" "$ROOT/tests/test_zip_extract.c"
 
 "$CC" -c -O2 -Wall -Wextra -Wno-unused-parameter -I"$ROOT/src" \
-  -I"$COMPAT_INC" "${RAR_CFLAGS[@]}" -include "$ROOT/tests/posix_compat.h" \
+  -I"$COMPAT_INC" -include "$ROOT/tests/posix_compat.h" \
   -o "$BUILD/test_rar_extract.o" "$ROOT/tests/test_rar_extract.c"
 
 objs=()
+rar_objs=()
 for obj in "$BUILD"/*.o; do
   case "$obj" in
     */zip_extract.o|*/rar_extract.o|*/test_zip_extract.o|*/test_rar_extract.o) continue ;;
+    */unrar7_*.o) rar_objs+=("$obj"); continue ;;
   esac
   objs+=("$obj")
 done
@@ -75,9 +87,13 @@ done
 "$CC" -O2 -o "$BUILD/test-zip-extract" \
   "$BUILD/zip_extract.o" "$BUILD/test_zip_extract.o" "${objs[@]}"
 
-"$CC" -O2 -o "$BUILD/test-rar-extract" \
+# The RAR test links the unrar7 objects, so it needs the C++ driver.
+# Windows unrar system.cpp references SetSuspendState (PowrProf).
+RAR_LIBS=()
+[ "$HOST_KIND" = windows ] && RAR_LIBS=(-lpowrprof)
+"$CXX" -O2 -o "$BUILD/test-rar-extract" \
   "$BUILD/rar_extract.o" "$BUILD/test_rar_extract.o" \
-  "$BUILD/zip_extract.o" "${objs[@]}"
+  "$BUILD/zip_extract.o" "${objs[@]}" "${rar_objs[@]}" "${RAR_LIBS[@]}"
 
 "$BUILD/test-zip-extract" "$ROOT/tests/fixtures" "$BUILD/work-zip"
 "$BUILD/test-rar-extract" "$ROOT/tests/fixtures" "$BUILD/work-rar"
