@@ -746,6 +746,31 @@ function isZipArchive(item) {
   return item.type === "-" && /\.zip$/i.test(item.name);
 }
 
+function isRarMainVolume(item) {
+  if (item.type !== "-") return false;
+  const name = item.name;
+  // RAR5 分卷首卷（数字最小的那一卷）：name.part01.rar / name.part1.rar / name.part001.rar
+  if (/\.part0*1\.rar$/i.test(name)) return true;
+  // 真正的单卷 .rar —— 排除任何包含 .partNN. 的文件名
+  if (/\.rar$/i.test(name) && !/\.part0*\d+\./i.test(name)) return true;
+  return false;
+}
+
+function isRarSubVolume(item) {
+  if (item.type !== "-") return false;
+  // RAR5 非首卷：.part02.rar, .part2.rar, .part002.rar ...
+  if (/\.part0*\d+\.rar$/i.test(item.name) &&
+      !/\.part0*1\.rar$/i.test(item.name)) return true;
+  return false;
+}
+
+function isExtractableArchive(item) {
+  if (item.type !== "-") return false;
+  if (/\.zip$/i.test(item.name)) return true;
+  if (isRarMainVolume(item)) return true;
+  return false;
+}
+
 function isSpecialDirectory(item) {
   if (item.type !== "d") return false;
   if (item.path === "/data") return true;
@@ -822,9 +847,9 @@ function promptLargeMode(sizeBytes) {
 
 function actionExtract() {
   if (busy || loadingPath) return;
-  const zips = selectedEntries().filter(isZipArchive);
-  if (zips.length !== 1) return;
-  const item = zips[0];
+  const archives = selectedEntries().filter(isExtractableArchive);
+  if (archives.length !== 1) return;
+  const item = archives[0];
   if (!confirm(t("extractConfirm", { name: displayName(item), path: displayPath(cwd) }))) return;
   const conflict = confirm(t("extractOverwriteAsk")) ? "overwrite" : "fail";
   const large = shouldPromptLargeMode(item.size) ? promptLargeMode(item.size) : false;
@@ -1327,14 +1352,27 @@ function renderInstallPkgButton(items, locked) {
 }
 
 function renderExtractButton(items, locked) {
-  const zips = items.filter(isZipArchive);
-  extractBtn.hidden = zips.length !== 1;
-  if (zips.length !== 1) {
+  const archives = items.filter(isExtractableArchive);
+  const subs    = items.filter(isRarSubVolume);
+
+  // 没有可解压档案也没有子卷 → 隐藏按钮
+  if (archives.length === 0 && subs.length === 0) {
+    extractBtn.hidden = true;
     extractBtn.title = "";
     extractBtn.disabled = true;
     return;
   }
-  extractBtn.title = t("extractToCurrent") + ": " + itemTitle(zips);
+
+  extractBtn.hidden = false;
+
+  // 只选中子卷(比如 .part02.rar),没有对应主卷 → 按钮置灰 + 提示改选主卷
+  if (archives.length !== 1) {
+    extractBtn.title = t("extractSelectMainVolume");
+    extractBtn.disabled = true;
+    return;
+  }
+
+  extractBtn.title = t("extractToCurrent") + ": " + itemTitle(archives);
   extractBtn.disabled = locked;
 }
 

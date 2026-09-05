@@ -107,6 +107,8 @@ window.WFM_LANG = {
   extractProgress: "{done} / {total} files",
   extractLargeAsk: "The archive looks large ({size}). Enable the large-file profile?\n\nOK = yes (single file up to 1 TiB, archive total up to 2 TiB)\nCancel = default limits (single file 64 GiB, archive total 512 GiB); this archive may be rejected",
   extractLargeActive: "Large-file profile is enabled for this task",
+  extractSelectMainVolume: "Please select the main volume (.rar or .part01.rar)",
+  extractArchivePending: "Preparing to extract {name}",
   sameSourceTarget: "Source and destination are the same. Cannot {label} {name}",
   removeConflictFirst: "A {existingType} named {name} already exists. To {label} this {sourceType}, delete that {existingType} first.",
   overwriteFiles: "Files with the same name will be overwritten: {names}",
