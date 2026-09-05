@@ -5,8 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > Release artifact for v1.9:
-> `web-file-mgr.elf` — size TBD
-> sha256 TBD
+> `web-file-mgr.elf` — size 919 440 bytes (~897 KiB)
+> sha256 `bb8f17e9addc6a9984f611503ca01b51f8984b773d353630da1f25bd1a28a997`
 > ELF class 64, little-endian, e_machine `0x003e` (x86_64-sie-ps5)
 >
 > Source delta vs v1.8.3: RAR engine replaced (dmc_unrar 1.7.0 → rarlab
