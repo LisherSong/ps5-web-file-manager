@@ -6,11 +6,26 @@ import shutil
 import stat
 import struct
 import sys
+import time as _time
 import zipfile
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "fixtures")
+
+# Force every ZIP entry's date_time to a fixed value (1980-01-01 00:00:00)
+# so generated archives are byte-stable across runs. Without this fix,
+# Python 3.13's zipfile.writestr() passes time.localtime(time.time())[:6]
+# into ZipInfo(...) when the caller supplies a string arcname, which makes
+# every fixture differ each run and the git diff stat balloons on every
+# "regenerate fixtures" pass. We swap the zipfile module's `time` symbol
+# for a fake that always returns the same struct_time; the fake also stubs
+# `time.time` since zipfile.writestr chains localtime(time.time()).
+_FIXED_DT = (1980, 1, 1, 0, 0, 0)
+zipfile.time = type("_FakeTimeMod", (), {
+    "localtime": staticmethod(lambda *_a, **_k: _time.struct_time(_FIXED_DT + (0, 1, 0))),
+    "time":      staticmethod(lambda *_a, **_k: 0.0),
+})()
 
 
 def fresh():
@@ -211,13 +226,69 @@ def conflict_source():
         zf.writestr("shareddir/added.txt", "added from zip")
 
 
+def rar_fixtures():
+    """Generate RAR fixtures if a rar/7z writer is available.
+
+    We intentionally do not depend on a rar binary being installed in the
+    host test environment; when neither `rar` nor `7z` is present we leave
+    1-byte placeholders so that tests/test_rar_extract.c can still hit its
+    "not a real archive" branches. See docs/HANDOVER.md for the manual
+    fixture procedure used in CI on a developer workstation that has WinRAR.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    candidates = []
+    for cmd in ("rar", "7z", "7za"):
+        if shutil.which(cmd):
+            candidates.append(cmd)
+
+    staging_dir = tempfile.mkdtemp(prefix="wfm-rar-fixtures-")
+    try:
+        # Build a small directory we can compress into a RAR.
+        staging_root = os.path.join(staging_dir, "stage")
+        os.makedirs(staging_root)
+        with open(os.path.join(staging_root, "root.txt"), "wb") as f:
+            f.write(b"rar root content\n")
+        nested = os.path.join(staging_root, "dir")
+        os.makedirs(nested)
+        with open(os.path.join(nested, "nested.txt"), "wb") as f:
+            f.write(b"rar nested content\n")
+
+        out = path("basic.rar")
+        ok = False
+        for cmd in candidates:
+            args = [cmd, "a", "-r", "-ep1", out,
+                    os.path.join(staging_root, "root.txt"),
+                    os.path.join(staging_root, "dir")]
+            # 7z uses -t7z / -rr differently; for the purposes of a smoke
+            # fixture we only need any small valid RAR.
+            try:
+                rc = subprocess.call(args, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+                if rc == 0 and os.path.exists(out) and os.path.getsize(out) > 16:
+                    print("rar_fixtures: built %s via %s" % (out, cmd))
+                    ok = True
+                    break
+            except Exception:
+                pass
+        if not ok:
+            # Placeholder: the test suite only needs a file that dmc_unrar
+            # will reject. 8 bytes is far too small to be a valid archive.
+            with open(out, "wb") as f:
+                f.write(b"placeholder")
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+
+
 def main():
     fresh()
     for fn in (basic, stored, unicode_names, zip64, traversal,
                traversal_backslash, absolute, drive_letter, duplicate,
                file_dir_clash, symlink_entry, fifo_entry, encrypted, bad_crc,
                truncated, not_a_zip, bomb, medium_bomb, many_files,
-               conflict_source):
+               conflict_source, rar_fixtures):
         fn()
     print("fixtures written to %s" % OUT)
     return 0

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Host test runner for the ZIP extraction engine.
-# Builds the vendored minizip-ng/zlib sources, the engine and the test suite
-# with the host compiler and runs the suite.
+# Host test runner for the ZIP and RAR extraction engines.
+# Builds the vendored minizip-ng/zlib/dmc_unrar sources, both engines and
+# the test suites with the host compiler and runs each suite.
 #
 #   ./tests/run-tests.sh
 #
@@ -20,6 +20,7 @@ mkdir -p "$BUILD"
 "$PYTHON" "$ROOT/tests/make_fixtures.py"
 
 MZ_CFLAGS=(-I"$ROOT/third_party/minizip-ng/include" -DHAVE_ZLIB -DZLIB_COMPAT)
+RAR_CFLAGS=(-I"$ROOT/third_party/unrar" -DDMC_UNRAR_DISABLE_BE32TOH_BE64TOH=1)
 HOST_KIND=posix
 # MinGW has no O_NOFOLLOW; the flag is only a host build workaround.
 case "$(uname -s)" in
@@ -38,22 +39,35 @@ for src in "$ROOT"/third_party/zlib/src/*.c "$ROOT"/third_party/minizip-ng/src/*
     "${MZ_CFLAGS[@]}" "${extra[@]}" -o "$BUILD/$name.o" "$src"
 done
 
+# dmc_unrar (single-file; uses stdio fopen by default on non-Windows)
+"$CC" -c -O2 -w "${RAR_CFLAGS[@]}" \
+  -o "$BUILD/dmc_unrar.o" "$ROOT/third_party/unrar/dmc_unrar.c"
+
 COMPAT_INC="$ROOT/tests/compat"
 
-# The engine and the test suite get the POSIX shim on Windows hosts.
+# The engines and the test suites get the POSIX shim on Windows hosts.
 "$CC" -c -O2 -Wall -Wextra -Wno-unused-parameter \
   -I"$ROOT/third_party/minizip-ng/include" -I"$ROOT/src" -I"$COMPAT_INC" \
   -include "$ROOT/tests/posix_compat.h" \
   -o "$BUILD/zip_extract.o" "$ROOT/src/zip_extract.c"
 
+"$CC" -c -O2 -Wall -Wextra -Wno-unused-parameter \
+  -I"$ROOT/third_party/minizip-ng/include" -I"$ROOT/src" -I"$COMPAT_INC" \
+  "${RAR_CFLAGS[@]}" -include "$ROOT/tests/posix_compat.h" \
+  -o "$BUILD/rar_extract.o" "$ROOT/src/rar_extract.c"
+
 "$CC" -c -O2 -Wall -Wextra -Wno-unused-parameter -I"$ROOT/src" \
   -I"$COMPAT_INC" -include "$ROOT/tests/posix_compat.h" \
   -o "$BUILD/test_zip_extract.o" "$ROOT/tests/test_zip_extract.c"
 
+"$CC" -c -O2 -Wall -Wextra -Wno-unused-parameter -I"$ROOT/src" \
+  -I"$COMPAT_INC" "${RAR_CFLAGS[@]}" -include "$ROOT/tests/posix_compat.h" \
+  -o "$BUILD/test_rar_extract.o" "$ROOT/tests/test_rar_extract.c"
+
 objs=()
 for obj in "$BUILD"/*.o; do
   case "$obj" in
-    */zip_extract.o|*/test_zip_extract.o) continue ;;
+    */zip_extract.o|*/rar_extract.o|*/test_zip_extract.o|*/test_rar_extract.o) continue ;;
   esac
   objs+=("$obj")
 done
@@ -61,4 +75,9 @@ done
 "$CC" -O2 -o "$BUILD/test-zip-extract" \
   "$BUILD/zip_extract.o" "$BUILD/test_zip_extract.o" "${objs[@]}"
 
-"$BUILD/test-zip-extract" "$ROOT/tests/fixtures" "$BUILD/work"
+"$CC" -O2 -o "$BUILD/test-rar-extract" \
+  "$BUILD/rar_extract.o" "$BUILD/test_rar_extract.o" \
+  "$BUILD/zip_extract.o" "${objs[@]}"
+
+"$BUILD/test-zip-extract" "$ROOT/tests/fixtures" "$BUILD/work-zip"
+"$BUILD/test-rar-extract" "$ROOT/tests/fixtures" "$BUILD/work-rar"
