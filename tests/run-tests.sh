@@ -19,7 +19,7 @@ mkdir -p "$BUILD"
 
 "$PYTHON" "$ROOT/tests/make_fixtures.py"
 
-MZ_CFLAGS=(-I"$ROOT/third_party/minizip-ng/include" -DHAVE_ZLIB -DZLIB_COMPAT)
+MZ_CFLAGS=(-I"$ROOT/third_party/minizip-ng/include" -DHAVE_ZLIB -DZLIB_COMPAT -D_FILE_OFFSET_BITS=64)
 RAR_CFLAGS=(-I"$ROOT/third_party/unrar" -DDMC_UNRAR_DISABLE_BE32TOH_BE64TOH=1)
 HOST_KIND=posix
 # MinGW has no O_NOFOLLOW; the flag is only a host build workaround.
