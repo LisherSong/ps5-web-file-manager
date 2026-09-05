@@ -166,10 +166,16 @@ if [ -f web-file-mgr.elf ]; then
     echo "    无源码变更 -- 跳过 make"
   else
     echo "    源码变更: $NEEDS_REBUILD"
-    make all 2>&1 | tail -40
+    if ! make all 2>&1 | tail -60; then
+      echo "FAIL: make all 失败(见上)。注意: 旧 ELF 仍留在原地, 但不算新产物"
+      exit 6
+    fi
   fi
 else
-  make all 2>&1 | tail -40
+  if ! make all 2>&1 | tail -60; then
+    echo "FAIL: make all 失败(见上)"
+    exit 6
+  fi
 fi
 
 # 7. 验证 + 同步回 Windows

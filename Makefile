@@ -47,7 +47,10 @@ GEN_SRCS    := $(patsubst assets/%,gen/%, $(ASSETS:=.c))
 CXX            ?= $(dir $(CC))prospero-clang++
 HOST_CXX       ?= c++
 
-# Source set mirrors UnRARDll.vcxproj's ClCompile list (49 files).
+# Source set mirrors UnRARDll.vcxproj's ClCompile list (49 files) MINUS the
+# Windows-only isnt.cpp / motw.cpp (they need windows.h; the official unrar
+# UNIX makefile omits them, and PS5/linux both use the _UNIX branch where
+# their symbols are #ifdef'd out).
 UNRAR7_SRCS := \
   third_party/unrar7/archive.cpp third_party/unrar7/arcread.cpp third_party/unrar7/blake2s.cpp \
   third_party/unrar7/cmddata.cpp third_party/unrar7/consio.cpp third_party/unrar7/crc.cpp \
@@ -56,8 +59,8 @@ UNRAR7_SRCS := \
   third_party/unrar7/filcreat.cpp third_party/unrar7/file.cpp third_party/unrar7/filefn.cpp \
   third_party/unrar7/filestr.cpp third_party/unrar7/find.cpp third_party/unrar7/getbits.cpp \
   third_party/unrar7/global.cpp third_party/unrar7/hash.cpp third_party/unrar7/headers.cpp \
-  third_party/unrar7/isnt.cpp third_party/unrar7/largepage.cpp third_party/unrar7/match.cpp \
-  third_party/unrar7/motw.cpp third_party/unrar7/options.cpp third_party/unrar7/pathfn.cpp \
+  third_party/unrar7/largepage.cpp third_party/unrar7/match.cpp \
+  third_party/unrar7/options.cpp third_party/unrar7/pathfn.cpp \
   third_party/unrar7/qopen.cpp third_party/unrar7/rar.cpp third_party/unrar7/rarpch.cpp \
   third_party/unrar7/rarvm.cpp third_party/unrar7/rawread.cpp third_party/unrar7/rdwrfn.cpp \
   third_party/unrar7/rijndael.cpp third_party/unrar7/rs.cpp third_party/unrar7/rs16.cpp \
