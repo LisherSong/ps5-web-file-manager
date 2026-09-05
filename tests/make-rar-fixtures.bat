@@ -1,8 +1,9 @@
 @echo off
 REM Generate real RAR fixtures for the v1.9 host test suite.
 REM Requires WinRAR command-line Rar.exe (ships with normal WinRAR install).
-REM Outputs into tests\fixtures\ - rerun any time fixture needs change.
-REM NOTE: keep this file pure ASCII (cmd.exe uses the ANSI codepage).
+REM Outputs into tests\fixtures-real\ - kept OUT of tests\fixtures\ because
+REM tests\make_fixtures.py wipes that directory on every test run.
+REM Rerun any time fixture needs change. NOTE: keep this file pure ASCII.
 setlocal EnableDelayedExpansion
 
 set RAREXE=
@@ -16,7 +17,9 @@ if "%RAREXE%"=="" (
 echo Using: %RAREXE%
 "%RAREXE%" 2>nul | findstr /c:"RAR " >nul || (echo [ERROR] %RAREXE% does not look like WinRAR & exit /b 1)
 
-set FIX=%~dp0fixtures
+set FIX=%~dp0fixtures-real
+if exist "%FIX%" rmdir /s /q "%FIX%"
+mkdir "%FIX%"
 set STAGE=%~dp0fixture-stage
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 mkdir "%STAGE%\dir" 2>nul

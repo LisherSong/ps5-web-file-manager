@@ -28,6 +28,7 @@
 #include "posix_compat.h"
 
 static const char *g_fixtures;
+static const char *g_fixtures_real;
 static char g_work[4096];
 static int g_failures;
 static int g_checks;
@@ -35,6 +36,11 @@ static int g_checks;
 static void
 fixture_path(char *out, size_t size, const char *name) {
   snprintf(out, size, "%s/%s", g_fixtures, name);
+}
+
+static void
+fixture_real_path(char *out, size_t size, const char *name) {
+  snprintf(out, size, "%s/%s", g_fixtures_real, name);
 }
 
 static void
@@ -315,7 +321,7 @@ test_real_archives(void) {
     zipx_result_t res;
     zipx_status_t st;
     char src[4096];
-    fixture_path(src, sizeof(src), "basic-v6.rar");
+    fixture_real_path(src, sizeof(src), "basic-v6.rar");
     if(exists(src)) {
       memset(&res, 0, sizeof(res));
       st = rar_extract(src, dst, ZIPX_CONFLICT_FAIL,
@@ -343,7 +349,7 @@ test_real_archives(void) {
     zipx_result_t res;
     zipx_status_t st;
     char src[4096];
-    fixture_path(src, sizeof(src), "basic-rar4.rar");
+    fixture_real_path(src, sizeof(src), "basic-rar4.rar");
     if(exists(src)) {
       memset(&res, 0, sizeof(res));
       st = rar_extract(src, dst, ZIPX_CONFLICT_FAIL,
@@ -369,7 +375,7 @@ test_real_archives(void) {
     zipx_result_t res;
     zipx_status_t st;
     char src[4096];
-    fixture_path(src, sizeof(src), "vol.part1.rar");
+    fixture_real_path(src, sizeof(src), "vol.part1.rar");
     if(exists(src)) {
       memset(&res, 0, sizeof(res));
       st = rar_extract(src, dst, ZIPX_CONFLICT_FAIL,
@@ -396,7 +402,7 @@ test_real_archives(void) {
     zipx_result_t res;
     zipx_status_t st;
     char src[4096];
-    fixture_path(src, sizeof(src), "enc-v6.rar");
+    fixture_real_path(src, sizeof(src), "enc-v6.rar");
     if(exists(src)) {
       memset(&res, 0, sizeof(res));
       st = rar_extract(src, dst, ZIPX_CONFLICT_FAIL,
@@ -416,10 +422,12 @@ test_real_archives(void) {
 int
 main(int argc, char **argv) {
   if(argc < 3) {
-    fprintf(stderr, "usage: %s <fixtures-dir> <work-dir>\n", argv[0]);
+    fprintf(stderr, "usage: %s <fixtures-dir> <work-dir> [real-fixtures-dir]\n",
+            argv[0]);
     return 2;
   }
   g_fixtures = argv[1];
+  g_fixtures_real = (argc >= 4) ? argv[3] : argv[1];
   snprintf(g_work, sizeof(g_work), "%s", argv[2]);
   mkdir(g_work, 0777);
 
