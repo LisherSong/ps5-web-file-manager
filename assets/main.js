@@ -156,7 +156,16 @@ function backendErrorText(code, arg, fallback) {
     params.available = formatBytes(parts[1] || 0, false);
   }
   const key = "err_" + code;
-  return L[key] ? t(key, params) : fallback || t("backendError");
+  const label = L[key] ? t(key, params) : "";
+  if (label) {
+    // Append the backend's own message (e.g. "cannot create file: No space
+    // left on device") when present — it carries the strerror detail that
+    // the i18n label otherwise hides.
+    const hint = fallback && fallback !== t("backendError")
+      ? " (" + String(fallback) + ")" : "";
+    return label + hint;
+  }
+  return fallback || t("backendError");
 }
 
 function applyStaticText() {
