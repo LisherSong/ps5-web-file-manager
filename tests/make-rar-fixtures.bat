@@ -30,46 +30,53 @@ echo nested payload line one > "%STAGE%\dir\nested.txt"
 echo nested payload line two >> "%STAGE%\dir\nested.txt"
 echo file-b 0102030405060708090a > "%STAGE%\b.bin"
 
+REM Work from inside the stage dir with RELATIVE names so the archive keeps
+REM the dir\ structure (no -ep1 stripping).
+pushd "%STAGE%"
+
 echo.
 echo [1/4] RAR5 v6 single volume - basic-v6.rar
-"%RAREXE%" a -ep1 -m2 -ma5 -idq "%FIX%\basic-v6.rar" "%STAGE%\root.txt" "%STAGE%\dir\nested.txt" "%STAGE%\b.bin"
-if errorlevel 1 echo   [FAIL] & goto :bad
+"%RAREXE%" a -m2 -ma5 -idq "%FIX%\basic-v6.rar" root.txt dir\nested.txt b.bin
+if errorlevel 1 echo   [FAIL] & goto :badpop
 
 echo [2/4] RAR5 v6 multi-volume - vol.part1.rar + vol.part2.rar + ...
 REM Create a 512 KB incompressible payload so -v200k actually splits it.
-fsutil file createnew "%STAGE%\big.bin" 524288 >nul 2>nul
-if not exist "%STAGE%\big.bin" (
+fsutil file createnew big.bin 524288 >nul 2>nul
+if not exist big.bin (
   echo   [WARN] fsutil unavailable - cannot force multi-volume; skipping
   goto :aftervol
 )
 REM rar a updates an existing archive instead of re-splitting it, so any
-REM stale single-volume vol.part1.rar must be removed first. Target name is
-REM plain "vol.rar": RAR5 numbering then yields vol.part1/2/3.rar (naming the
+REM stale volume files must be removed first. Target name is plain
+REM "vol.rar": RAR5 numbering then yields vol.part1/2/3.rar (naming the
 REM target vol.part1.rar would double up to vol.part1.partN.rar).
 del "%FIX%\vol*.rar" 2>nul
-"%RAREXE%" a -ep1 -m0 -ma5 -v200k -idq "%FIX%\vol.rar" "%STAGE%\big.bin" "%STAGE%\root.txt"
-if errorlevel 1 echo   [FAIL] & goto :bad
+"%RAREXE%" a -m0 -ma5 -v200k -idq "%FIX%\vol.rar" big.bin root.txt
+if errorlevel 1 echo   [FAIL] & goto :badpop
 echo   wrote: & dir /b "%FIX%\vol.part*.rar" 2>nul
 :aftervol
 
 echo [3/4] RAR5 v6 encrypted (password: secret123) - enc-v6.rar
-"%RAREXE%" a -ep1 -m2 -ma5 -psecret123 -idq "%FIX%\enc-v6.rar" "%STAGE%\root.txt" "%STAGE%\dir\nested.txt"
-if errorlevel 1 echo   [FAIL] & goto :bad
+"%RAREXE%" a -m2 -ma5 -psecret123 -idq "%FIX%\enc-v6.rar" root.txt dir\nested.txt
+if errorlevel 1 echo   [FAIL] & goto :badpop
 
 echo [4/4] RAR4 legacy (optional - some WinRAR builds dropped RAR4 writing)
-"%RAREXE%" a -ep1 -m2 -ma4 -idq "%FIX%\basic-rar4.rar" "%STAGE%\root.txt" "%STAGE%\dir\nested.txt"
+"%RAREXE%" a -m2 -ma4 -idq "%FIX%\basic-rar4.rar" root.txt dir\nested.txt
 if errorlevel 1 (
   echo   [WARN] RAR4 creation not supported by this Rar.exe - skipping basic-rar4.rar
 ) else (
   echo   basic-rar4.rar written
 )
 
-if exist "%STAGE%" rmdir /s /q "%STAGE%"
+popd
+rmdir /s /q "%STAGE%" 2>nul
 echo.
 echo OK. Fixtures written to %FIX%:
 dir /b "%FIX%\*.rar" 2>nul
 exit /b 0
 
+:badpop
+popd
 :bad
 echo [ERROR] WinRAR command failed. Is this WinRAR 5+ with command line support?
 exit /b 1
