@@ -45,6 +45,28 @@ ends_with_ci(const char *path, const char *suffix) {
   return !strcasecmp(path + path_len - suf_len, suffix);
 }
 
+/* Progress callback. The engine already throttles reports (200 ms / 1 MiB),
+   so we can forward each report straight into the shared task state.
+   Defined before extract_dispatch() so the dispatcher's call site compiles
+   cleanly under -Werror=implicit-function-declaration. */
+static void
+extract_progress(void *userdata, const zipx_progress_t *p) {
+  file_task_t *task = userdata;
+  unsigned long long prev_done;
+  unsigned long long delta;
+
+  pthread_mutex_lock(&g_tasks_lock);
+  task->entries_total = p->entries_total;
+  task->entries_done = p->entries_done;
+  task->total = p->bytes_total;
+  prev_done = task->done;
+  pthread_mutex_unlock(&g_tasks_lock);
+
+  delta = p->bytes_done > prev_done ? p->bytes_done - prev_done : 0;
+  task_update(task, TASK_RUNNING, p->current ? p->current : task->src,
+              delta, NULL);
+}
+
 /* Pick the right engine by the archive file name. Returns ZIPX_ERR_FORMAT
    for anything that does not look like a supported archive. */
 static zipx_status_t
@@ -69,26 +91,6 @@ extract_dispatch(file_task_t *task, zipx_conflict_t conflict,
              "unsupported archive format (only .zip and .rar are accepted)");
     return ZIPX_ERR_UNSUPPORTED;
   }
-}
-
-/* Progress callback. The engine already throttles reports (200 ms / 1 MiB),
-   so we can forward each report straight into the shared task state. */
-static void
-extract_progress(void *userdata, const zipx_progress_t *p) {
-  file_task_t *task = userdata;
-  unsigned long long prev_done;
-  unsigned long long delta;
-
-  pthread_mutex_lock(&g_tasks_lock);
-  task->entries_total = p->entries_total;
-  task->entries_done = p->entries_done;
-  task->total = p->bytes_total;
-  prev_done = task->done;
-  pthread_mutex_unlock(&g_tasks_lock);
-
-  delta = p->bytes_done > prev_done ? p->bytes_done - prev_done : 0;
-  task_update(task, TASK_RUNNING, p->current ? p->current : task->src,
-              delta, NULL);
 }
 
 static const char *

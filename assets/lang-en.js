@@ -105,7 +105,7 @@ window.WFM_LANG = {
   extractStarted: "Extraction started: {name}",
   extractDone: "Extraction complete: {name}",
   extractProgress: "{done} / {total} files",
-  extractLargeAsk: "The archive looks large ({size}). Enable the large-file profile?\n\nOK = yes (single file up to 1 TiB, archive total up to 2 TiB)\nCancel = default limits (single file 256 GiB, archive total 1 TiB); this archive may be rejected",
+  extractLargeAsk: "The archive looks large ({size}). Enable the large-file profile?\n\nOK = yes (single file up to 1 TiB, archive total up to 4 TiB)\nCancel = default limits (single file 512 GiB, archive total 2 TiB); this archive may be rejected",
   extractLargeActive: "Large-file profile is enabled for this task",
   extractSelectMainVolume: "Please select the main volume (.rar or .part01.rar)",
   extractArchivePending: "Preparing to extract {name}",

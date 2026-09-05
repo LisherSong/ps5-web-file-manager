@@ -835,7 +835,13 @@ async function startExtractTask(path, dstDir, conflict, removeSource, name, larg
   }
 }
 
-const LARGE_FILE_THRESHOLD_BYTES = 240 * 1024 * 1024 * 1024;
+// Threshold above which the web UI prompts the user before extracting.
+// Tuned so a typical 3A-game archive (~300 GiB single file) and a PS5 system
+// backup (~300 GiB total) extract under the default profile without prompting.
+// Files between this threshold and the default max_file_bytes cap (512 GiB)
+// still extract silently; larger files require explicit user opt-in via the
+// large=1 API flag.
+const LARGE_FILE_THRESHOLD_BYTES = 480 * 1024 * 1024 * 1024;
 
 function shouldPromptLargeMode(itemSize) {
   return Number(itemSize || 0) > LARGE_FILE_THRESHOLD_BYTES;

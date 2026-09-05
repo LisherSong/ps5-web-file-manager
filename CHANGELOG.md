@@ -4,14 +4,98 @@ All notable changes to **PS5 Web File Manager** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> Release artifact for v1.8.1:
-> `web-file-mgr.elf` — size TBD (cross-compile runs in WSL — see `docs/HANDOVER.md`)
-> sha256 TBD
+> Release artifact for v1.8.2:
+> `web-file-mgr.elf` — size 509 704 bytes (~497 KiB)
+> sha256 `1b2c3d68b35e32737105f17d14a80a3c159ceca0cabd274ee168cbcd81906f65`
 > ELF class 64, little-endian, e_machine `0x003e` (x86_64-sie-ps5)
 >
-> Source delta vs v1.8: 3 source files relaxed (`src/zip_extract.c` k_default_limits,
-> `assets/main.js` `LARGE_FILE_THRESHOLD_BYTES`, `assets/lang-{en,zh}.js` copy);
-> no vendored or engine changes.
+> Source delta vs v1.8.1: 5 files relaxed (`src/zip_extract.c` k_default_limits
+> + k_large_limits, `assets/main.js` `LARGE_FILE_THRESHOLD_BYTES`,
+> `assets/lang-{en,zh}.js` copy, `tests/test_zip_extract.c` advertised-number
+> assertion, README/HANDOVER numeric references) + 2 PS5-only build fixes
+> (`Makefile` CFLAGS `-Ithird_party/unrar`, `src/extract.c` forward
+> declaration of `extract_progress`); no vendored or engine changes.
+
+## [v1.8.2] — 2026-09-05
+
+**Hotfix: default ZIP extraction limits cover 3A-game single-file archives.**
+
+The default `k_default_limits` profile is now **2 TiB total / 512 GiB per
+entry / 500 : 1 ratio** (was 1 TiB / 256 GiB / 500 : 1 in v1.8.1). The
+frontend threshold `LARGE_FILE_THRESHOLD_BYTES` is bumped from 240 GiB to
+**480 GiB** to match. The `large=1` profile is widened to **4 TiB total
+/ 1 TiB per entry / 1000 : 1 ratio** (was 2 TiB / 1 TiB / 1000 : 1); the
+large profile must always be strictly more permissive than default.
+
+Why: a 3A-game archive with a single ~300 GiB uncompressed file was
+**silently rejected by the default profile** (`scan_archive` returns
+`ZIPX_ERR_LIMIT_FILE_SIZE` in `src/zip_extract.c` line ~717 — the request
+never reaches the frontend confirmation prompt, so the user just sees
+"卡壳"). The 256 GiB default cap was tuned for PS5 system backups (which
+have many smaller entries, not a single huge file) and was wrong for the
+3A-game single-file case. The default cap is now 512 GiB so a typical
+3A archive extracts under the default profile without prompting.
+
+The safety argument is unchanged from v1.8.1: zip-bomb defence is
+`check_space()` (`statvfs`-based real disk space check before staging) +
+`max_ratio` (declared compression ratio cap). The size caps are a UX
+guard, not a security boundary.
+
+RAR extraction inherits the new defaults automatically — rar_extract.c
+threads `c->limits` through from the engine, so no rar-side change is
+required.
+
+### Changed
+
+- `src/zip_extract.c` — `k_default_limits` relaxed:
+  - `max_total_bytes`: 1 TiB → **2 TiB**
+  - `max_file_bytes`: 256 GiB → **512 GiB**
+  - `max_ratio`: 500 → **500** (unchanged)
+- `src/zip_extract.c` — `k_large_limits` widened (must stay > default):
+  - `max_total_bytes`: 2 TiB → **4 TiB**
+  - `max_file_bytes`: 1 TiB → **1 TiB** (unchanged)
+  - `max_ratio`: 1000 → **1000** (unchanged)
+- `assets/main.js` — `LARGE_FILE_THRESHOLD_BYTES`: 240 GiB → **480 GiB**
+- `assets/lang-{en,zh}.js` — `extractLargeAsk` copy updated to reflect
+  the new numbers (default 512 GiB / 2 TiB; large 1 TiB / 4 TiB)
+- `tests/test_zip_extract.c` — `test_large_profile` advertised-number
+  assertion updated: `max_total_bytes == 4 TiB` (was 2 TiB)
+- `README.md` — both limit tables (ZIP + RAR), the "Tuning the threshold"
+  snippet, and the `err_extract_entry_too_large` FAQ entry bumped to the
+  new numbers
+- `docs/HANDOVER.md` — `LARGE_FILE_THRESHOLD_BYTES`, the
+  `k_default_limits` / `k_large_limits` ASCII diagram, the user-scenario
+  description, the 480 GiB popup note, and the RAR limits paragraph
+  bumped to the new numbers
+
+### Unchanged
+
+- `src/rar_extract.c` — already threads `c->limits` from the engine,
+  picks up the new defaults for free
+- `max_ratio` — both profiles unchanged (500 : 1 default / 1000 : 1 large)
+- `check_space()` — unchanged; still the real disk-space guard
+- `max_entries` — 200 000 default / 500 000 large, unchanged
+- `docs/UPGRADE-v1.7-zip-large-file-profile.md` — historical v1.7
+  document left as-is so the v1.7 → v1.8.2 evolution is traceable
+- Test fixture `medium_bomb.zip` (ratio ≈ 238) still exercises both
+  rejection under the default 500 : 1 cap and acceptance under the
+  `large=1` 1000 : 1 cap
+- 84 host-side checks (70 ZIP + 14 RAR), 0 failures
+
+### Migration notes
+
+- **Forward-compatible** — users with v1.8.1 deployments who never trigger
+  `err_extract_entry_too_large` see no difference (defaults are strictly
+  more permissive)
+- **3A-game single-file archives now extract silently** — no prompt, no
+  manual `large=1` API call required for files up to 512 GiB
+- **No data loss** — the relaxation only widens accepted archives; the
+  real security guards (`check_space`, `max_ratio`, `path traversal`)
+  are untouched
+- **No frontend UX change for typical use** — only archives > 480 GiB
+  on disk now trigger the confirmation prompt (previously 240 GiB)
+
+---
 
 ## [v1.8.1] — 2026-09-05
 

@@ -33,22 +33,40 @@
 #define ZIPX_PUBLISH_MAX_DEPTH 128
 #define ZIPX_SPACE_SLACK_PER_ENTRY 512
 
+/* Default limits.
+ *
+ * Tuned to cover real-world PS5 workloads without prompting:
+ *   - PS5 system backup ZIPs (~200-300 GiB total, individual chunks <64 GiB)
+ *   - 3A-game archives with a single ~300 GiB uncompressed file
+ *
+ * Safety against zip bombs is delegated to:
+ *   1. `check_space()` (statvfs-based real disk space check) before extract
+ *   2. `max_ratio` below (declared compression ratio cap)
+ * The size caps here are an early-fail UX guard, not a security boundary.
+ */
 static const zipx_limits_t k_default_limits = {
   .max_entries = 200000,
-  .max_total_bytes = 1ULL * 1024 * 1024 * 1024 * 1024,
-  .max_file_bytes = 256ULL * 1024 * 1024 * 1024,
+  .max_total_bytes = 2ULL * 1024 * 1024 * 1024 * 1024,
+  .max_file_bytes = 512ULL * 1024 * 1024 * 1024,
   .max_ratio = 500,
   .max_depth = 32,
   .max_name_len = 255,
   .max_path_len = 1024
 };
 
-/* Large profile for archives that exceed the safe limits (e.g. 200 GB system
-   images). The relaxed ratio still rejects obvious bombs; the size caps
-   require the user to opt in via the web UI before they take effect. */
+/* Large profile for archives that exceed the default cap.
+ *
+ *   - max_file_bytes  = 1 TiB   (single uncompressed file)
+ *   - max_total_bytes = 4 TiB   (whole archive)
+ *   - max_ratio       = 1000    (relaxed ratio cap; check_space still applies)
+ *
+ * Requires the user to opt in via the web UI (large=1) before these take
+ * effect. Default limits must always be strictly smaller than large so the
+ * large profile is unambiguously a relaxation.
+ */
 static const zipx_limits_t k_large_limits = {
   .max_entries = 500000,
-  .max_total_bytes = 2ULL * 1024 * 1024 * 1024 * 1024,
+  .max_total_bytes = 4ULL * 1024 * 1024 * 1024 * 1024,
   .max_file_bytes = 1ULL * 1024 * 1024 * 1024 * 1024,
   .max_ratio = 1000,
   .max_depth = 32,

@@ -559,8 +559,8 @@ test_large_profile(void) {
   check(large->max_entries == 500000, "max_entries == 500000");
   check(large->max_file_bytes == 1ULL * 1024 * 1024 * 1024 * 1024,
         "max_file_bytes == 1 TiB");
-  check(large->max_total_bytes == 2ULL * 1024 * 1024 * 1024 * 1024,
-        "max_total_bytes == 2 TiB");
+  check(large->max_total_bytes == 4ULL * 1024 * 1024 * 1024 * 1024,
+        "max_total_bytes == 4 TiB");
   check(large->max_ratio == 1000, "max_ratio == 1000");
 
   /* Behaviour: medium_bomb.zip is 1 MiB of 0..255 cycled, compressing to

@@ -45,7 +45,7 @@ THIRD_PARTY_CFLAGS := -O2 -w -Ithird_party/zlib/include -Ithird_party/minizip-ng
 PS5_TP_OBJS   := $(patsubst %.c,ps5-obj/%.o,$(THIRD_PARTY_SRCS))
 LINUX_TP_OBJS := $(patsubst %.c,linux-obj/%.o,$(THIRD_PARTY_SRCS))
 
-CFLAGS := -Oz -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Werror -ffunction-sections -fdata-sections -Isrc -Ithird_party/minizip-ng/include -DVERSION_TAG=\"$(VERSION_TAG)\" -DTITLE_ID=\"$(TITLE_ID)\"
+CFLAGS := -Oz -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Werror -ffunction-sections -fdata-sections -Isrc -Ithird_party/minizip-ng/include -Ithird_party/unrar -DVERSION_TAG=\"$(VERSION_TAG)\" -DTITLE_ID=\"$(TITLE_ID)\"
 CFLAGS += `$(PKG_CONFIG) libmicrohttpd --cflags`
 LDFLAGS := -Wl,--gc-sections
 LDADD  := `$(PKG_CONFIG) libmicrohttpd --libs`

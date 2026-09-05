@@ -121,7 +121,7 @@ SDK 的 `target/user/homebrew/` 被 `songl(197609)` 拥有 755，普通 song 写
 - `assets/lang-en.js` 和 `lang-zh.js` 新增 `extractLargeAsk` / `extractLargeActive`
 
 **前端 UX**：
-- ZIP 大于 240 GiB 时弹窗「启用大文件模式？」
+- ZIP 大于 480 GiB 时弹窗「启用大文件模式？」
 - 用户点 OK → 传 `large=1` → 引擎走 large profile
 - 用户点取消 → 走 default profile（多半会被拒绝）
 

@@ -184,10 +184,10 @@ Passed as `conflict=` on `/api/extract`:
 
 ### Tuning the threshold
 
-The 240 GiB frontend threshold lives in `assets/main.js`:
+The 480 GiB frontend threshold lives in `assets/main.js`:
 
 ```js
-const LARGE_FILE_THRESHOLD_BYTES = 240 * 1024 * 1024 * 1024;
+const LARGE_FILE_THRESHOLD_BYTES = 480 * 1024 * 1024 * 1024;
 ```
 
 Set it to `Infinity` to silence the prompt, lower it to be more conservative, or remove the call entirely — the server still respects `large=1` regardless of the threshold.
@@ -368,10 +368,11 @@ Output is a per-case `check`-style report — **83 checks** on the current `main
 - **This is a homebrew app and should not intentionally modify system processes or kernel memory.** If you hit a kernel panic, make sure you are using a recent jailbreak method and ELF loader, or revert to the stable method you normally use.
 - **P2JB users** — if this payload triggers a kernel panic, avoid using it on that setup. Stability matters more than convenience when each retry is expensive.
 - **The preparing stage can take a while** when a folder contains many files — it sums folder size and checks free space, which helps avoid starting a copy / move / upload / download that cannot finish safely.
-- **`err_extract_entry_too_large`** — default archive caps are 256 GiB per
-  entry / 500:1 ratio. Confirm the large-file prompt (appears for
-  archives > 240 GiB on disk), split the archive, or pass `large=1`
-  directly to the API.
+- **`err_extract_entry_too_large`** — default archive caps are 512 GiB per
+  entry / 500:1 ratio (covers a typical 3A-game archive with one ~300 GiB
+  uncompressed file). If you exceed the default, confirm the large-file
+  prompt (appears for archives > 480 GiB on disk), split the archive, or
+  pass `large=1` directly to the API.
 - **`err_extract_unsupported`** — the archive uses a feature the engine
   cannot handle: encrypted ZIP, encrypted RAR, multi-volume RAR
   (`.part02+.rar`), very-old RAR 1.4, RAR symlinks / FIFOs, or a file

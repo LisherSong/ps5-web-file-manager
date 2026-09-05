@@ -105,7 +105,7 @@ window.WFM_LANG = {
   extractStarted: "已开始解压 {name}",
   extractDone: "解压完成：{name}",
   extractProgress: "{done} / {total} 个文件",
-  extractLargeAsk: "ZIP 体积较大（{size}），是否启用「大文件模式」？\n\n确定 = 启用（单文件最大 1 TiB / 总解压最大 2 TiB）\n取消 = 默认限制（单文件 256 GiB / 总解压 1 TiB），可能拒绝此压缩包",
+  extractLargeAsk: "ZIP 体积较大（{size}），是否启用「大文件模式」？\n\n确定 = 启用（单文件最大 1 TiB / 总解压最大 4 TiB）\n取消 = 默认限制（单文件 512 GiB / 总解压 2 TiB），可能拒绝此压缩包",
   extractLargeActive: "此任务已启用大文件模式",
   extractSelectMainVolume: "请改选主卷（如 .rar 或 .part01.rar）",
   extractArchivePending: "正在准备解压 {name}",
