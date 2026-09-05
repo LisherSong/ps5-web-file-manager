@@ -39,6 +39,9 @@ if not exist "%STAGE%\big.bin" (
   echo   [WARN] fsutil unavailable - cannot force multi-volume; skipping
   goto :aftervol
 )
+REM rar a updates an existing archive instead of re-splitting it, so any
+REM stale single-volume vol.part1.rar must be removed first.
+del "%FIX%\vol.part*.rar" 2>nul
 "%RAREXE%" a -ep1 -m0 -ma5 -v200k -idq "%FIX%\vol.part1.rar" "%STAGE%\big.bin" "%STAGE%\root.txt"
 if errorlevel 1 echo   [FAIL] & goto :bad
 echo   wrote: & dir /b "%FIX%\vol.part*.rar" 2>nul
