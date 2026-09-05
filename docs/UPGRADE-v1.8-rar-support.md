@@ -416,10 +416,10 @@ self-evident from the failure.
 
 ### 7.4 The `large=1` prompt for RAR
 
-The threshold is shared. A `.rar` larger than `60 GiB` triggers the
+The threshold is shared. A `.rar` larger than `240 GiB` triggers the
 same `promptLargeMode()` confirmation as a `.zip`. The confirmation
-text uses `extractLargeAsk` (unchanged from v1.7) — the wording is
-format-agnostic, so no new strings are needed.
+text uses `extractLargeAsk` (slightly relaxed in v1.8.1) — the wording
+is format-agnostic, so no new strings are needed.
 
 ---
 
@@ -441,7 +441,7 @@ host has any RAR tooling.
 | `test_engine_dispatch_null_dst` | `rar_extract(path, NULL, …)` is rejected with `ZIPX_ERR_INTERNAL`. |
 | `test_engine_dispatch_dst_is_regular_file` | `rar_extract(path, /some/file, …)` returns `ZIPX_ERR_CONFLICT` (open_parent_dirs fails). |
 | `test_format_translation`          | Parametric: for each `DMC_UNRAR_*` code we care about, the corresponding `rar_translate_error()` mapping is exercised indirectly (via `result->message` strings). |
-| `test_limits_handoff_default`       | When `task->extract_large == 0`, the default profile is handed in (200 K entries / 512 GiB / 64 GiB / 200:1). |
+| `test_limits_handoff_default`       | When `task->extract_large == 0`, the default profile is handed in (200 K entries / 1 TiB / 256 GiB / 500:1). |
 | `test_limits_handoff_large`         | When `task->extract_large == 1`, the large profile is handed in (500 K / 2 TiB / 1 TiB / 1000:1). |
 | `test_translate_open_fail_to_err_open` | DMC open-failure → `ZIPX_ERR_OPEN`. |
 | `test_translate_volume_unsp_to_err_unsupported` | The DMC volume code → `ZIPX_ERR_UNSUPPORTED`. |

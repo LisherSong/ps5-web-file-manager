@@ -87,7 +87,7 @@ SDK 的 `target/user/homebrew/` 被 `songl(197609)` 拥有 755，普通 song 写
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │ Frontend: assets/main.js                                       │
-│   - LARGE_FILE_THRESHOLD_BYTES = 60 GiB (硬编码)               │
+│   - LARGE_FILE_THRESHOLD_BYTES = 240 GiB (硬编码)              │
 │   - shouldPromptLargeMode(itemSize) → 弹 confirm              │
 │   - startExtractTask(path, dst, conflict, remove, name, large) │
 └────────────────────┬───────────────────────────────────────────┘
@@ -103,8 +103,8 @@ SDK 的 `target/user/homebrew/` 被 `songl(197609)` 拥有 755，普通 song 写
                      │
 ┌────────────────────▼───────────────────────────────────────────┐
 │ Engine: src/zip_extract.{h,c}                                  │
-│   - k_default_limits: 200K / 512GiB / 64GiB / 200:1           │
-│   - k_large_limits:   500K / 2TiB  / 1TiB  / 1000:1           │
+│   - k_default_limits: 200K / 1TiB  / 256GiB / 500:1           │
+│   - k_large_limits:   500K / 2TiB  / 1TiB   / 1000:1           │
 │   - ZIPX_LIMITS_DEFAULT=0 / ZIPX_LIMITS_LARGE=1               │
 │   - zipx_limits_profile(int) → const zipx_limits_t*           │
 │   - zipx_extract() 签名不变，向后兼容                          │
@@ -121,7 +121,7 @@ SDK 的 `target/user/homebrew/` 被 `songl(197609)` 拥有 755，普通 song 写
 - `assets/lang-en.js` 和 `lang-zh.js` 新增 `extractLargeAsk` / `extractLargeActive`
 
 **前端 UX**：
-- ZIP 大于 60 GiB 时弹窗「启用大文件模式？」
+- ZIP 大于 240 GiB 时弹窗「启用大文件模式？」
 - 用户点 OK → 传 `large=1` → 引擎走 large profile
 - 用户点取消 → 走 default profile（多半会被拒绝）
 
@@ -1130,8 +1130,8 @@ multi-volume (`name.part01.rar`, `name.part02.rar`, …). Encrypted
 archives prompt for a password client-side; the password is held
 only in memory and never saved.
 
-Limits mirror the ZIP profiles (200K entries / 512 GiB / 64 GiB /
-ratio 200 by default, with the same `large=1` opt-in to 500K /
+Limits mirror the ZIP profiles (200K entries / 1 TiB / 256 GiB /
+ratio 500 by default, with the same `large=1` opt-in to 500K /
 2 TiB / 1 TiB / 1000).
 ```
 

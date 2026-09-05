@@ -43,7 +43,7 @@ The same source tree builds a Linux binary for development and a PS5 payload ELF
 ## What's new in v1.7
 
 - **ZIP large-file profile** (opt-in via the new `large=1` argument on `/api/extract`): relaxed caps of **2 TiB** archive total, **1 TiB** per entry, **1000 : 1** compression ratio. The frontend prompts for confirmation whenever the archive on disk is larger than **60 GiB**; the server only activates the profile when the user explicitly agrees.
-- **Stricter default ZIP profile** stays safe: **512 GiB** total / **64 GiB** per entry / **200 : 1** ratio. A 4 MiB compressed payload that expands to 800 GiB still gets rejected before any output file is opened.
+- **Stricter default ZIP profile** stays safe: **1 TiB** total / **256 GiB** per entry / **500 : 1** ratio. A 4 MiB compressed payload that expands to 800 GiB still gets rejected before any output file is opened.
 - **69 host-side C tests** (`tests/run-tests.sh`) now cover path traversal, ZIP64, encryption rejection, ratios, conflict policies and the new large-file profile (`tests/test_zip_extract.c`).
 - Earlier refinements — see `git log` since v1.6.
 
@@ -156,13 +156,13 @@ Plain ZIPs only — stored / deflated / ZIP64, **never encrypted**. The engine i
 | Limit | Default profile | Large profile (`ZIPX_LIMITS_LARGE`) |
 |---|---|---|
 | `max_entries` | 200 000 | 500 000 |
-| `max_total_bytes` (uncompressed) | 512 GiB | 2 TiB |
-| `max_file_bytes` (per entry) | 64 GiB | 1 TiB |
-| `max_ratio` (uncompressed / compressed) | 200 : 1 | 1000 : 1 |
+| `max_total_bytes` (uncompressed) | 1 TiB | 2 TiB |
+| `max_file_bytes` (per entry) | 256 GiB | 1 TiB |
+| `max_ratio` (uncompressed / compressed) | 500 : 1 | 1000 : 1 |
 | `max_depth` (folder nesting) | 32 | 32 |
 | `max_name_len` / `max_path_len` | 255 / 1024 | 255 / 1024 |
 
-The **default profile** is shipped safe: a 4 MiB compressed blob that decodes to 800 GiB is rejected before any output file is opened. The **large profile** is engaged **only** when the request includes `large=1` — the archive dialog prompts the user automatically whenever the archive on disk is larger than `LARGE_FILE_THRESHOLD_BYTES` (60 GiB by default; configurable in `assets/main.js`). Confirming the prompt is the user's explicit opt-in; the server still records nothing extra on its own.
+The **default profile** is shipped safe: a 4 MiB compressed blob that decodes to 800 GiB is rejected before any output file is opened. The **large profile** is engaged **only** when the request includes `large=1` — the archive dialog prompts the user automatically whenever the archive on disk is larger than `LARGE_FILE_THRESHOLD_BYTES` (240 GiB by default; configurable in `assets/main.js`). Confirming the prompt is the user's explicit opt-in; the server still records nothing extra on its own.
 
 ### Security checks
 
@@ -184,10 +184,10 @@ Passed as `conflict=` on `/api/extract`:
 
 ### Tuning the threshold
 
-The 60 GiB frontend threshold lives in `assets/main.js`:
+The 240 GiB frontend threshold lives in `assets/main.js`:
 
 ```js
-const LARGE_FILE_THRESHOLD_BYTES = 60 * 1024 * 1024 * 1024;
+const LARGE_FILE_THRESHOLD_BYTES = 240 * 1024 * 1024 * 1024;
 ```
 
 Set it to `Infinity` to silence the prompt, lower it to be more conservative, or remove the call entirely — the server still respects `large=1` regardless of the threshold.
@@ -228,14 +228,14 @@ profile table on top. Defaults and the `large=1` opt-in are identical:
 | Limit | Default profile | Large profile (`large=1`) |
 |---|---|---|
 | `max_entries` | 200 000 | 500 000 |
-| `max_total_bytes` (uncompressed) | 512 GiB | 2 TiB |
-| `max_file_bytes` (per entry) | 64 GiB | 1 TiB |
-| `max_ratio` (uncompressed / compressed) | 200 : 1 | 1000 : 1 |
+| `max_total_bytes` (uncompressed) | 1 TiB | 2 TiB |
+| `max_file_bytes` (per entry) | 256 GiB | 1 TiB |
+| `max_ratio` (uncompressed / compressed) | 500 : 1 | 1000 : 1 |
 | `max_depth` (folder nesting) | 32 | 32 |
 | `max_name_len` / `max_path_len` | 255 / 1024 | 255 / 1024 |
 
 Large-profile RAR extraction uses the same `LARGE_FILE_THRESHOLD_BYTES`
-(60 GiB) prompt as ZIP — the frontend treats `.rar` and `.zip` the same
+(240 GiB) prompt as ZIP — the frontend treats `.rar` and `.zip` the same
 way for the prompt, and the server only ever activates the large caps
 when the request carries `large=1` (opt-in).
 
@@ -368,9 +368,9 @@ Output is a per-case `check`-style report — **83 checks** on the current `main
 - **This is a homebrew app and should not intentionally modify system processes or kernel memory.** If you hit a kernel panic, make sure you are using a recent jailbreak method and ELF loader, or revert to the stable method you normally use.
 - **P2JB users** — if this payload triggers a kernel panic, avoid using it on that setup. Stability matters more than convenience when each retry is expensive.
 - **The preparing stage can take a while** when a folder contains many files — it sums folder size and checks free space, which helps avoid starting a copy / move / upload / download that cannot finish safely.
-- **`err_extract_entry_too_large`** — default archive caps are 64 GiB per
-  entry / 200:1 ratio. Confirm the large-file prompt (appears for
-  archives > 60 GiB on disk), split the archive, or pass `large=1`
+- **`err_extract_entry_too_large`** — default archive caps are 256 GiB per
+  entry / 500:1 ratio. Confirm the large-file prompt (appears for
+  archives > 240 GiB on disk), split the archive, or pass `large=1`
   directly to the API.
 - **`err_extract_unsupported`** — the archive uses a feature the engine
   cannot handle: encrypted ZIP, encrypted RAR, multi-volume RAR

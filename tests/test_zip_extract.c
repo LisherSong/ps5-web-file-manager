@@ -564,36 +564,39 @@ test_large_profile(void) {
   check(large->max_ratio == 1000, "max_ratio == 1000");
 
   /* Behaviour: medium_bomb.zip is 1 MiB of 0..255 cycled, compressing to
-     ~4 KiB (ratio ~238). Default ratio cap 200 rejects it; large ratio
-     cap 1000 accepts it. This is the headline behavioural difference
-     between the two profiles. */
+     ~4 KiB (ratio ~238). Default ratio cap 500 accepts it; large ratio
+     cap 1000 also accepts it. This shows that real-world high-ratio
+     archives (think raw image dumps, fat binaries) are not artificially
+     blocked by the relaxed default. */
   printf("ratio cap\n");
-  expect_status(&res, run("medium_bomb.zip", "out_large_medium_default",
-                          ZIPX_CONFLICT_FAIL, NULL, &t, &res),
-                ZIPX_ERR_LIMIT_RATIO,
-                "default ratio cap rejects medium_bomb.zip");
-  expect_ok(&res, run("medium_bomb.zip", "out_large_medium_large",
+  expect_ok(&res, run("medium_bomb.zip", "out_ratio_medium_default",
+                      ZIPX_CONFLICT_FAIL, NULL, &t, &res),
+            "default ratio cap (500) accepts medium_bomb.zip (~238:1)");
+  expect_ok(&res, run("medium_bomb.zip", "out_ratio_medium_large",
                       ZIPX_CONFLICT_FAIL, large, &t, &res),
-            "large ratio cap accepts medium_bomb.zip");
+            "large ratio cap (1000) accepts medium_bomb.zip (~238:1)");
 
   /* bomb.zip is 4 MiB of identical 'A' bytes, compressing to ~4 KiB
-     (ratio ~1026). The large profile's default cap of 1000 is still a
-     real cap — it rejects the bomb too. The profile is a higher
-     threshold, not the absence of one. */
-  expect_status(&res, run("bomb.zip", "out_large_bomb_default",
+     (ratio ~1026). Both default cap 500 and large cap 1000 reject it.
+     A bomb is a bomb regardless of which profile you opt into. */
+  expect_status(&res, run("bomb.zip", "out_ratio_bomb_default",
+                          ZIPX_CONFLICT_FAIL, NULL, &t, &res),
+                ZIPX_ERR_LIMIT_RATIO,
+                "default ratio cap (500) rejects bomb.zip (~1026:1)");
+  expect_status(&res, run("bomb.zip", "out_ratio_bomb_large",
                           ZIPX_CONFLICT_FAIL, large, &t, &res),
                 ZIPX_ERR_LIMIT_RATIO,
                 "large ratio cap (1000) rejects bomb.zip (~1026:1)");
 
-  /* Lowering the large profile's ratio below the medium bomb's actual
+  /* Lowering the user's chosen ratio below the medium bomb's actual
      ratio still rejects the archive. The caps are still enforced; the
      profile just starts at a higher number. */
   tight = *large;
   tight.max_ratio = 200;
-  expect_status(&res, run("medium_bomb.zip", "out_large_medium_tight",
+  expect_status(&res, run("medium_bomb.zip", "out_ratio_medium_tight",
                           ZIPX_CONFLICT_FAIL, &tight, &t, &res),
                 ZIPX_ERR_LIMIT_RATIO,
-                "lowered large ratio still enforced");
+                "user-lowered ratio (200) rejects medium_bomb.zip (~238:1)");
 
   /* Lowering the large profile's file cap below zip64.zip's 4 KiB still
      rejects the archive. */

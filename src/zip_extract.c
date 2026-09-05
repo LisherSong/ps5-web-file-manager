@@ -35,9 +35,9 @@
 
 static const zipx_limits_t k_default_limits = {
   .max_entries = 200000,
-  .max_total_bytes = 512ULL * 1024 * 1024 * 1024,
-  .max_file_bytes = 64ULL * 1024 * 1024 * 1024,
-  .max_ratio = 200,
+  .max_total_bytes = 1ULL * 1024 * 1024 * 1024 * 1024,
+  .max_file_bytes = 256ULL * 1024 * 1024 * 1024,
+  .max_ratio = 500,
   .max_depth = 32,
   .max_name_len = 255,
   .max_path_len = 1024

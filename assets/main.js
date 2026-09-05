@@ -835,7 +835,7 @@ async function startExtractTask(path, dstDir, conflict, removeSource, name, larg
   }
 }
 
-const LARGE_FILE_THRESHOLD_BYTES = 60 * 1024 * 1024 * 1024;
+const LARGE_FILE_THRESHOLD_BYTES = 240 * 1024 * 1024 * 1024;
 
 function shouldPromptLargeMode(itemSize) {
   return Number(itemSize || 0) > LARGE_FILE_THRESHOLD_BYTES;
