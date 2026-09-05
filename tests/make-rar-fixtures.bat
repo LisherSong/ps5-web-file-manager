@@ -40,9 +40,11 @@ if not exist "%STAGE%\big.bin" (
   goto :aftervol
 )
 REM rar a updates an existing archive instead of re-splitting it, so any
-REM stale single-volume vol.part1.rar must be removed first.
-del "%FIX%\vol.part*.rar" 2>nul
-"%RAREXE%" a -ep1 -m0 -ma5 -v200k -idq "%FIX%\vol.part1.rar" "%STAGE%\big.bin" "%STAGE%\root.txt"
+REM stale single-volume vol.part1.rar must be removed first. Target name is
+REM plain "vol.rar": RAR5 numbering then yields vol.part1/2/3.rar (naming the
+REM target vol.part1.rar would double up to vol.part1.partN.rar).
+del "%FIX%\vol*.rar" 2>nul
+"%RAREXE%" a -ep1 -m0 -ma5 -v200k -idq "%FIX%\vol.rar" "%STAGE%\big.bin" "%STAGE%\root.txt"
 if errorlevel 1 echo   [FAIL] & goto :bad
 echo   wrote: & dir /b "%FIX%\vol.part*.rar" 2>nul
 :aftervol
