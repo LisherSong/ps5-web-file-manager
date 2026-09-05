@@ -1,7 +1,8 @@
 @echo off
 REM Generate real RAR fixtures for the v1.9 host test suite.
-REM Requires WinRAR's command-line Rar.exe (ships with a normal WinRAR install).
-REM Outputs into tests\fixtures\ — rerun any time you change fixture needs.
+REM Requires WinRAR command-line Rar.exe (ships with normal WinRAR install).
+REM Outputs into tests\fixtures\ - rerun any time fixture needs change.
+REM NOTE: keep this file pure ASCII (cmd.exe uses the ANSI codepage).
 setlocal EnableDelayedExpansion
 
 set RAREXE=
@@ -39,9 +40,13 @@ echo [3/4] RAR5 v6 encrypted (password: secret123) - enc-v6.rar
 "%RAREXE%" a -ep1 -m2 -ma5 -psecret123 -idq "%FIX%\enc-v6.rar" "%STAGE%\root.txt" "%STAGE%\dir\nested.txt"
 if errorlevel 1 echo   [FAIL] & goto :bad
 
-echo [4/4] RAR4 legacy - basic-rar4.rar
+echo [4/4] RAR4 legacy (optional - some WinRAR builds dropped RAR4 writing)
 "%RAREXE%" a -ep1 -m2 -ma4 -idq "%FIX%\basic-rar4.rar" "%STAGE%\root.txt" "%STAGE%\dir\nested.txt"
-if errorlevel 1 echo   [FAIL] & goto :bad
+if errorlevel 1 (
+  echo   [WARN] RAR4 creation not supported by this Rar.exe - skipping basic-rar4.rar
+) else (
+  echo   basic-rar4.rar written
+)
 
 if exist "%STAGE%" rmdir /s /q "%STAGE%"
 echo.
