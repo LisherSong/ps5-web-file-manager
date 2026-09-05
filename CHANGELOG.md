@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > Release artifact for v1.8.3:
 > `web-file-mgr.elf` — size 509 704 bytes (~497 KiB)
-> sha256 `eb60c7e4636d91e18e36e1be1dd437c99c7d82c20b85a7b5f187b2302bdfdf83`
+> sha256 `fdcf7b09b69e2160e77dfa084c0e890ba0696d4dd478b1d5ff499cdc9f527955`
 > ELF class 64, little-endian, e_machine `0x003e` (x86_64-sie-ps5)
 >
 > Source delta vs v1.8.2: 5 files touched (4 user-facing + 1 build pipeline) —
@@ -63,6 +63,9 @@ Changed:
   "uploaded archive".
 - `assets/lang-zh.js` — `extractUploadConfirm` & `extractLargeAsk`
   drop the "ZIP" wording so the copy reads sensibly for RAR uploads.
+- `assets/main.js:38` — `APP_VERSION` `"v1.7"` → `"v1.8.3"` (footer
+  version string had been hard-coded to v1.7 since the frontend was
+  first imported; it no longer misleads about which build is running).
 
 No backend changes — the server side was already correct. No test
 changes — the existing RAR happy-path test in `tests/test_rar_extract.c`
