@@ -298,6 +298,121 @@ test_limits_handoff(void) {
         "default() matches ZIPX_LIMITS_DEFAULT");
 }
 
+/* Real-archive happy paths (v1.9, unrar 7.20.1 engine).
+   The fixtures are produced by tests/make-rar-fixtures.bat on a machine with
+   WinRAR; when they are missing (plain CI checkout) these checks SKIP. */
+static void
+test_real_archives(void) {
+  char dst[4096];
+  char checkp[4096];
+
+  printf("test_real_archives\n");
+
+  /* RAR5 (WinRAR 6/7 "v6" compression) single volume. */
+  work_path(dst, sizeof(dst), "rdst_v6");
+  remove_dir(dst);
+  {
+    zipx_result_t res;
+    zipx_status_t st;
+    char src[4096];
+    fixture_path(src, sizeof(src), "basic-v6.rar");
+    if(exists(src)) {
+      memset(&res, 0, sizeof(res));
+      st = rar_extract(src, dst, ZIPX_CONFLICT_FAIL,
+                       zipx_default_limits(), NULL, NULL, NULL, &res);
+      check(st == ZIPX_OK, "basic-v6.rar extracts (v6 RAR5)");
+      if(st == ZIPX_OK) {
+        snprintf(checkp, sizeof(checkp), "%s/root.txt", dst);
+        check(exists(checkp), "  root.txt present");
+        snprintf(checkp, sizeof(checkp), "%s/dir/nested.txt", dst);
+        check(exists(checkp), "  dir/nested.txt present");
+        check(res.entries_done >= 3, "  entries_done >= 3");
+      } else {
+        printf("    message=%s\n", res.message);
+      }
+    } else {
+      printf("  SKIP basic-v6.rar (missing — run tests/make-rar-fixtures.bat)\n");
+    }
+  }
+  remove_dir(dst);
+
+  /* RAR4 legacy single volume. */
+  work_path(dst, sizeof(dst), "rdst_r4");
+  remove_dir(dst);
+  {
+    zipx_result_t res;
+    zipx_status_t st;
+    char src[4096];
+    fixture_path(src, sizeof(src), "basic-rar4.rar");
+    if(exists(src)) {
+      memset(&res, 0, sizeof(res));
+      st = rar_extract(src, dst, ZIPX_CONFLICT_FAIL,
+                       zipx_default_limits(), NULL, NULL, NULL, &res);
+      check(st == ZIPX_OK, "basic-rar4.rar extracts (RAR4)");
+      if(st == ZIPX_OK) {
+        snprintf(checkp, sizeof(checkp), "%s/root.txt", dst);
+        check(exists(checkp), "  root.txt present");
+      } else {
+        printf("    message=%s\n", res.message);
+      }
+    } else {
+      printf("  SKIP basic-rar4.rar (missing)\n");
+    }
+  }
+  remove_dir(dst);
+
+  /* Multi-volume: opening vol.part1.rar must auto-merge part2 from the same
+     directory (unrar drives the volume chain). */
+  work_path(dst, sizeof(dst), "rdst_vol");
+  remove_dir(dst);
+  {
+    zipx_result_t res;
+    zipx_status_t st;
+    char src[4096];
+    fixture_path(src, sizeof(src), "vol.part1.rar");
+    if(exists(src)) {
+      memset(&res, 0, sizeof(res));
+      st = rar_extract(src, dst, ZIPX_CONFLICT_FAIL,
+                       zipx_default_limits(), NULL, NULL, NULL, &res);
+      check(st == ZIPX_OK, "vol.part1.rar auto-merges volumes");
+      if(st == ZIPX_OK) {
+        snprintf(checkp, sizeof(checkp), "%s/root.txt", dst);
+        check(exists(checkp), "  root.txt present across volumes");
+        check(res.entries_done >= 3, "  entries_done >= 3");
+      } else {
+        printf("    message=%s\n", res.message);
+      }
+    } else {
+      printf("  SKIP vol.part1.rar (missing)\n");
+    }
+  }
+  remove_dir(dst);
+
+  /* Encrypted: engine can decrypt but the password channel is not wired yet,
+     so encrypted entries must be rejected up front with UNSUPPORTED. */
+  work_path(dst, sizeof(dst), "rdst_enc");
+  remove_dir(dst);
+  {
+    zipx_result_t res;
+    zipx_status_t st;
+    char src[4096];
+    fixture_path(src, sizeof(src), "enc-v6.rar");
+    if(exists(src)) {
+      memset(&res, 0, sizeof(res));
+      st = rar_extract(src, dst, ZIPX_CONFLICT_FAIL,
+                       zipx_default_limits(), NULL, NULL, NULL, &res);
+      check(st == ZIPX_ERR_UNSUPPORTED, "enc-v6.rar rejected (no password channel)");
+      check(!exists(dst), "  no files written for encrypted archive");
+      if(st == ZIPX_OK) {
+        remove_dir(dst);
+      }
+    } else {
+      printf("  SKIP enc-v6.rar (missing)\n");
+    }
+  }
+  remove_dir(dst);
+}
+
 int
 main(int argc, char **argv) {
   if(argc < 3) {
@@ -341,6 +456,7 @@ main(int argc, char **argv) {
   test_engine_dispatch();
   test_format_translation();
   test_limits_handoff();
+  test_real_archives();
 
   printf("\nrar_extract: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
