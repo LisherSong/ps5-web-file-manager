@@ -131,11 +131,13 @@ linux-obj/%.o: %.cpp
 	$(HOST_CXX) $(UNRAR7_CXX_FLAGS_HOST) -c -o $@ $<
 
 # Link with the C++ driver so libc++ (PS5) / libstdc++ (host) is pulled in
-# automatically for the unrar objects.
+# automatically for the unrar objects. The project's own C sources are passed
+# through -x c (clang++ would otherwise compile .c files as C++ and trip
+# -Wdeprecated); -x none restores extension-based handling for the .o files.
 $(BIN): $(PS5_SRCS) $(GEN_SRCS) $(PS5_TP_OBJS)
-	$(CXX) $(CFLAGS) $(LDFLAGS) -o $@ $(filter %.c,$^) $(PS5_TP_OBJS) $(LDADD)
+	$(CXX) $(CFLAGS) $(LDFLAGS) -o $@ -x c $(filter %.c,$^) -x none $(PS5_TP_OBJS) $(LDADD)
 	$(STRIP) $@
 
 $(LINUX_BIN): $(LINUX_SRCS) $(GEN_SRCS) $(LINUX_TP_OBJS)
-	$(HOST_CXX) $(LINUX_CFLAGS) -o $@ $(filter %.c,$^) $(LINUX_TP_OBJS) $(LINUX_LDADD)
+	$(HOST_CXX) $(LINUX_CFLAGS) -o $@ -x c $(filter %.c,$^) -x none $(LINUX_TP_OBJS) $(LINUX_LDADD)
 	$(HOST_STRIP) $@
