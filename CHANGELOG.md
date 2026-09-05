@@ -4,6 +4,16 @@ All notable changes to **PS5 Web File Manager** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> Release artifact for v1.9:
+> `web-file-mgr.elf` — size TBD
+> sha256 TBD
+> ELF class 64, little-endian, e_machine `0x003e` (x86_64-sie-ps5)
+>
+> Source delta vs v1.8.3: RAR engine replaced (dmc_unrar 1.7.0 → rarlab
+> UnRAR 7.20.1, `third_party/unrar/` → `third_party/unrar7/`), new
+> `src/rar_extract.c` scan/extract implementation, Makefile + host-test
+> C++ rules, 5 real RAR fixtures committed. See [v1.9] below.
+>
 > Release artifact for v1.8.3:
 > `web-file-mgr.elf` — size 509 704 bytes (~497 KiB)
 > sha256 `fdcf7b09b69e2160e77dfa084c0e890ba0696d4dd478b1d5ff499cdc9f527955`
@@ -23,6 +33,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > assertion, README/HANDOVER numeric references) + 2 PS5-only build fixes
 > (`Makefile` CFLAGS `-Ithird_party/unrar`, `src/extract.c` forward
 > declaration of `extract_progress`); no vendored or engine changes.
+
+## [v1.9] — 2026-09-05
+
+**RAR engine replaced: rarlab UnRAR 7.20.1 (v6 / multi-volume / decryption-capable).**
+
+The vendored dmc_unrar 1.7.0 only dispatched RAR5 compression version 5
+(`switch(file->version)` case `0x5000`). Archives written by WinRAR 6.x /
+7.x (algorithm string `v6`, version field `0x5001`) hit the default branch
+and surfaced as "corrupt archive" — confirmed on a real `v6:8M` archive.
+v1.9 swaps in the official rarlab UnRAR source (7.20.1) via its
+C-compatible DLL API, compiled as a static library (`-DRARDLL`, PS5 uses
+the toolchain's default `libc++`).
+
+What this enables:
+
+- **RAR5 "v6" compression** (WinRAR 6/7 archives) — the v1.9 trigger.
+- **Multi-volume RAR** (`.partNN.rar`): unrar stitches volumes by name when
+  all parts sit next to the opened volume. Select the first volume
+  (`name.part1.rar`) and extract as usual.
+- RAR4 and older RAR5 remain supported.
+- The engine *can* decrypt encrypted archives (`RARSetPassword`), but the
+  password channel (API + UI) is not wired yet — encrypted headers/entries
+  still fail up front with `err_extract_unsupported`. Planned for a follow-up.
+
+Engine changes:
+
+- `src/rar_extract.c` rewritten to unrar's sequential DLL API
+  (`RAROpenArchiveEx → RARReadHeaderEx → RARProcessFile`); scan and extract
+  each re-open the archive. Multi-volume continuation segments
+  (`RHDF_SPLITBEFORE`) are advanced but not re-counted/deduped.
+- The three-phase scan → staging → publish/rollback machinery is unchanged.
+- Bug fix: `normalize_name()` no longer clears the caller's directory flag
+  (a real v6 archive with an explicit directory header after its files
+  tripped the duplicate detector).
+
+Build & test:
+
+- Makefile: `.cpp` rules for the unrar RARDLL source set (49 files, mirrors
+  `UnRARDll.vcxproj`); links through the C++ driver; `VERSION_TAG` v1.9.
+- tests: 5 real RAR fixtures committed under `tests/fixtures-real/`
+  (generated with `tests/make-rar-fixtures.bat` + WinRAR); new happy-path
+  checks extract a real v6 archive, verify files on disk, auto-merge a
+  3-volume split, and reject encrypted archives. Total: **70 ZIP + 24 RAR
+  = 94 checks** (up from 70 + 14; the old 14 RAR checks never ran a real
+  archive).
+
+Credits: unrar (c) Alexander Roshal, freeware license — see
+`third_party/unrar7/license.txt` and `THIRD_PARTY_NOTICES`.
 
 ## [v1.8.3] — 2026-09-05
 

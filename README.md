@@ -2,7 +2,7 @@
 
 > Homebrew HTTP file manager for jailbroken PS5 consoles. Browse, edit, upload, download and extract ZIPs through any browser on the same network — single self-contained ELF payload, no external services, no telemetry.
 
-**Version:** v1.8.2 · **Title ID:** `FMGR88888` · **License:** GPLv3+ · **Target:** `x86_64-sie-ps5`
+**Version:** v1.9 · **Title ID:** `FMGR88888` · **License:** GPLv3+ · **Target:** `x86_64-sie-ps5`
 
 ---
 
@@ -11,6 +11,22 @@
 A payload ELF that runs an HTTP file manager inside a jailbroken PS5. Open `http://<PS5_IP>:8888/` from any browser on the LAN — including the PS5 browser itself — to manage files on attached USB storage and the user partition. Designed for safely copying game-dump folders from USB to internal storage, but it also handles general file management, in-place text editing, PKG preview/install, image preview, and ZIP extraction with built-in zip-bomb protection.
 
 The same source tree builds a Linux binary for development and a PS5 payload ELF for deployment — see `make linux` below.
+
+## What's new in v1.9
+
+- **RAR engine replaced with the official rarlab UnRAR 7.20.1**
+  (`third_party/unrar7/`, replacing dmc_unrar). This is what actually
+  makes RAR extraction work on real files: dmc_unrar could not decode
+  archives written by **WinRAR 6.x/7.x** (RAR5 "v6" compression) and had
+  no multi-volume support — both now work.
+- **RAR5 "v6" archives extract** (the v1.8-era "corrupt archive" report
+  on WinRAR 6/7 files is gone).
+- **Multi-volume RAR** (`.part01.rar` chains): unrar stitches the parts by
+  name when the full set sits next to the volume you open.
+- Engine can decrypt encrypted RAR (`RARSetPassword`) — password UI /
+  API plumbing still pending, encrypted archives are rejected for now.
+- Host tests now run real archives (v6 / encrypted / 3-volume fixtures
+  committed under `tests/fixtures-real/`): **70 ZIP + 24 RAR = 94 checks**.
 
 ## What's new in v1.8
 
@@ -110,7 +126,7 @@ The same source tree builds a Linux binary for development and a PS5 payload ELF
 - **Upload** — single files or folder trees from any device on the LAN (hidden in the PS5 browser). Atomic temp + rename.
 - **Download** — single file as raw bytes, or folders/multi-select as a streaming `.tar`. Hidden in the PS5 browser.
 - **Tasks** — full-screen overlay with delayed show, live progress, throughput, ETA, cancel, and recovery if the browser is closed and reopened mid-task.
-- **Archive extraction** — ZIP (encrypted rejected) and RAR (single-volume unencrypted); see the [ZIP extraction](#zip-extraction) and [RAR extraction](#rar-extraction) sections below for scope.
+- **Archive extraction** — ZIP (encrypted rejected) and RAR (v1.9: RAR4 + RAR5 incl. WinRAR 6/7 "v6", multi-volume; encrypted still rejected pending password UI); see the [ZIP extraction](#zip-extraction) and [RAR extraction](#rar-extraction) sections below for scope.
 - **PKG** — install and preview `.pkg` files.
 - **Images** — preview `.png .jpg .jpeg .gif .bmp .webp`.
 - **Localization** — English + Simplified Chinese, auto-selected from `navigator.languages`.
@@ -158,7 +174,7 @@ make
 Output:
 
 ```text
-web-file-mgr.elf   (~497 KiB, x86_64-sie-ps5)
+web-file-mgr.elf   (~several hundred KiB, larger in v1.9 with unrar; x86_64-sie-ps5)
 ```
 
 For pure UI/JS work without the PS5 toolchain:
@@ -236,31 +252,32 @@ Set it to `Infinity` to silence the prompt, lower it to be more conservative, or
 
 ## RAR extraction
 
-A single-volume, **unencrypted** RAR archive engine (`src/rar_extract.{c,h}`,
-backed by the vendored FLOSS library
-[`dmc_unrar`](https://github.com/DrMcCoy/dmc_unrar) at
-`third_party/unrar/dmc_unrar.c`). Files with the extension `.rar` get the
-same **Extract** button as `.zip` files; the engine is dispatched by
-`src/extract.c` based on extension.
+A RAR extraction engine (`src/rar_extract.{c,h}`) backed by the **official
+rarlab UnRAR source** (`third_party/unrar7/`, version 7.20.1, compiled as a
+static library and driven through its C-compatible DLL API). Files with the
+extension `.rar` get the same **Extract** button as `.zip` files; the engine
+is dispatched by `src/extract.c` based on extension.
+
+> v1.9 replaced the v1.8 engine (dmc_unrar 1.7.0). dmc_unrar could not
+> decode archives written by WinRAR 6.x/7.x (RAR5 "v6" compression) and had
+> no multi-volume support; unrar handles both natively.
 
 ### Scope
 
 | Format | Support | Notes |
 |---|---|---|
-| RAR 1.5 / 2.0 / 2.6 / 2.9 / 3.0 / 3.6 / 4.0 | ✅ | Single-volume, unencrypted |
-| RAR 5.0 | ✅ | Single-volume, unencrypted |
-| Solid blocks, dictionary 4 MiB (RAR4) / 32 MiB (RAR5) | ✅ | |
+| RAR 1.5 → 4.x (incl. 2.9 / 3.6 / 4.0) | ✅ | |
+| RAR 5.0 and **5.0 "v6"** (WinRAR 6.x / 7.x) | ✅ | The v1.9 trigger |
+| Solid blocks, dictionary up to 1 GiB | ✅ | |
 | PPMd decompression (RAR 3.0+) | ✅ | |
-| **Multi-volume** (`.part01.rar` + `.part02.rar` + …) | ❌ | Rejected with `ZIPX_ERR_UNSUPPORTED`. The frontend greys out non-`01` sub-volumes with a tooltip. Join / unrar on a PC first. |
-| **Encrypted RAR** (any encrypted header or file) | ❌ | Rejected with `ZIPX_ERR_UNSUPPORTED`. There is no `password=` field in `/api/extract`. |
+| **Multi-volume** (`.part01.rar` + `.part02.rar` + …) | ✅ | unrar stitches parts by name when the whole set sits next to the volume you open. Select the first volume (`name.part1.rar` / `name.part01.rar`); non-first volumes are still greyed out in the UI with a hint. |
+| **Encrypted RAR** | ⏳ | The engine can decrypt (`RARSetPassword`), but the password field / prompt is not wired into `/api/extract` yet. Encrypted archives are rejected up front with `ZIPX_ERR_UNSUPPORTED`. |
 | Symbolic links / FIFOs / sockets / devices | ❌ | Rejected with `ZIPX_ERR_SPECIAL` (mirrors ZIP behaviour) |
-| RAR 1.4 (very old) | ❌ | Not supported by dmc_unrar 1.7.0; rejected upstream |
+| RAR 1.3 (pre-1.4) | ❌ | Rejected upstream by unrar |
 
-The "extract on a PC first" recovery is the same escape hatch the engine
-uses for ZIP encryption errors: when an unsupported archive is rejected,
-the user gets an `extract_unsupported` failure with the file name as the
-detail argument. The frontend already shows this with the typical
-bilingual retry guidance.
+When an archive is rejected, the user gets an `extract_unsupported`
+failure with the file name as the detail argument. The frontend already
+shows this with the typical bilingual retry guidance.
 
 ### Limits
 
@@ -297,37 +314,32 @@ The RAR engine applies the same checks as the ZIP engine — re-uses
 
 ### Vendoring and licence
 
-`third_party/unrar/dmc_unrar.c` is vendored **verbatim** from
-[`DrMcCoy/dmc_unrar`](https://github.com/DrMcCoy/dmc_unrar), upstream
-commit pinned at the same date as the v1.8 release. The file is
-**GPL-2.0-or-later** (see `third_party/unrar/COPYING`), which means the
-resulting `web-file-mgr.elf` is also effectively GPL-2.0-or-later. The
-already-GPLv3+ project is forward-compatible with that, and the
-compliant distribution form (binary + corresponding sources + GPL
-notice alongside the LGPL notice for libmicrohttpd) is the same
-process you already follow for every prior release. The minimal
-project-authored facade `third_party/unrar/dmc_unrar_api.h` carries the
-project's own licence and is *not* bound to GPL.
+`third_party/unrar7/` is a verbatim copy of the official **rarlab UnRAR
+source** (7.20.1), mirrored by
+[`opello/unrar`](https://github.com/opello/unrar) at commit `97e1780`. It is
+distributed under the **UnRAR freeware licence** (see
+`third_party/unrar7/license.txt`): it may be used in any software to handle
+RAR archives, but may not be used to develop a RAR-compatible *archiver* or
+re-create the RAR compression algorithm. The project-authored facade
+`third_party/unrar7/unrar_c_api.h` carries the project's own licence.
 
-### v1.9 plan
+> The v1.8 engine `third_party/unrar/dmc_unrar.c` (DrMcCoy/dmc_unrar 1.7.0,
+> GPL-2.0-or-later) was removed in v1.9; its notice lives in git history.
 
-When (if) multi-volume RAR and encrypted RAR become worth the
-engineering cost, the recommended path is to replace
-`third_party/unrar/dmc_unrar.c` with a vendored mirror of
-[`opello/unrar`](https://github.com/opello/unrar) (a faithful copy of
-rarlab UnRAR 7.x, C++17, supports volumes + encryption). The
-`rar_extract()` signature, the dispatch layer, and the host tests do
-**not** need to change — only the engine behind `rar_extract()` and the
-`password=` field on `/api/extract`. See
-[`third_party/unrar/VENDORED.md`](./third_party/unrar/VENDORED.md) for
-the step-by-step upgrade recipe.
+### Encrypted RAR (planned)
+
+The engine can decrypt archives (via `RARSetPassword`), but the password
+channel — a `password=` field on `/api/extract` plus a frontend prompt —
+is not wired yet. Encrypted archives currently fail with
+`extract_unsupported`. The engine swap (v1.9) removed the hard engine
+limits; the remaining work is purely API/UI plumbing.
 
 ## Verification
 
 After `make`, sanity-check the produced ELF:
 
 ```sh
-ls -la web-file-mgr.elf                            # size ~497 KiB on v1.8.2 (~427 KiB on v1.8)
+ls -la web-file-mgr.elf                            # size grew in v1.9 (unrar static library); ~509 KiB was v1.8.3
 sha256sum web-file-mgr.elf                         # record the digest in your release notes
 file  web-file-mgr.elf                             # expect "ELF 64-bit LSB pie executable, x86-64"
 od -An -tx1 -N20 web-file-mgr.elf | head -2        # magic 7f45 4c46 0201 + e_machine 003e

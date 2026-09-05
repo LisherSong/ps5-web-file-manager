@@ -2,8 +2,9 @@ Third-Party Notices
 ===================
 
 This project vendors a minimal set of third-party source files under
-`third_party/` to provide the ZIP extraction feature (the `/api/extract`
-endpoint). Their full license texts are included alongside the sources.
+`third_party/` to provide the ZIP and RAR extraction features (the
+`/api/extract` endpoint). Their full license texts are included
+alongside the sources.
 
 1. minizip-ng
    -----------
@@ -21,26 +22,29 @@ endpoint). Their full license texts are included alongside the sources.
    Files   : third_party/zlib/** (vendored subset, compiled with relaxed
              warnings into the final binary)
 
-3. dmc_unrar
-   ---------
-   Version : 1.7.0
-   Source  : https://github.com/DrMcCoy/dmc_unrar
-   License : GPL-2.0-or-later (see third_party/unrar/COPYING)
-   Files   : third_party/unrar/dmc_unrar.c (single-file library, compiled
-             with relaxed warnings; the small facade header
-             third_party/unrar/dmc_unrar_api.h is project-authored and
-             carries the project's license).
+3. unrar (rarlab UnRAR source, v7.20.1)
+   -------------------------------------
+   Version : 7.20.1 (RAR 7.23-free source snapshot, 2025-10-28)
+   Source  : https://www.rarlab.com/rar_add.htm — mirrored by
+             https://github.com/opello/unrar (commit 97e1780)
+   License : UnRAR freeware license (see third_party/unrar7/license.txt)
+   Files   : third_party/unrar7/** (RARDLL source set compiled with
+             relaxed warnings; unrar_c_api.h is project-authored and
+             carries the project's license)
 
-dmc_unrar is the engine behind `src/rar_extract.c` (the v1.8 RAR support).
-It is a dependency-free, single-file, C89/C99 FLOSS UnRAR library. Because
-it is licensed under the GPL-2.0-or-later, the resulting `web-file-mgr.elf`
-binary inherits the obligation to ship the GPL notice and source — which is
-exactly what this file plus `third_party/unrar/COPYING` provides. The
-interface in `dmc_unrar_api.h` is minimal and re-declares only the entry
-points the project uses.
+unrar is the engine behind `src/rar_extract.c` (the v1.9 RAR support: RAR4,
+RAR5 including WinRAR 6/7 "v6" compression, and multi-volume archives; the
+engine can also decrypt via RARSetPassword once a password channel is wired
+up). The UnRAR source may be used in any software to handle RAR archives,
+but may not be used to develop a RAR-compatible *archiver* or to re-create
+the RAR compression algorithm, which is proprietary.
 
-Both libraries in section 1 and 2 are distributed under the zlib license,
-which permits redistribution in source and binary form provided the
-copyright notice and this list of conditions are retained. dmc_unrar is
-distributed under the GNU GPL v2-or-later. See the individual LICENSE /
-COPYING files in each `third_party/` subdirectory for the complete terms.
+(The v1.8 engine, DrMcCoy/dmc_unrar 1.7.0 under GPL-2.0-or-later, was
+replaced by the rarlab UnRAR source in v1.9; see git history under
+`third_party/unrar/` for its notice.)
+
+Libraries in sections 1 and 2 are distributed under the zlib license, which
+permits redistribution in source and binary form provided the copyright
+notice and this list of conditions are retained. unrar is distributed under
+its own freeware terms. See the individual LICENSE / license.txt files in
+each `third_party/` subdirectory for the complete terms.
