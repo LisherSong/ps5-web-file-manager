@@ -2,7 +2,7 @@
 
 > Homebrew HTTP file manager for jailbroken PS5 consoles. Browse, edit, upload, download and extract ZIPs through any browser on the same network — single self-contained ELF payload, no external services, no telemetry.
 
-**Version:** v1.8 · **Title ID:** `FMGR88888` · **License:** GPLv3+ · **Target:** `x86_64-sie-ps5`
+**Version:** v1.8.2 · **Title ID:** `FMGR88888` · **License:** GPLv3+ · **Target:** `x86_64-sie-ps5`
 
 ---
 
@@ -39,6 +39,48 @@ The same source tree builds a Linux binary for development and a PS5 payload ELF
 - See the [dedicated section](#rar-extraction) below for scope and the
   limitations that come from using dmc_unrar (no multi-volume, no
   encryption in v1.8 — both lift in v1.9 when the library is replaced).
+
+## What's new in v1.8.1
+
+- **Default ZIP limits relaxed** (companion to v1.7's large profile).
+  v1.7 shipped with a 64 GiB default per-entry cap, which was too
+  aggressive for typical PS5 system-backup ZIPs (200-300 GiB). v1.8.1
+  raises the default profile to **1 TiB total / 256 GiB per entry /
+  500 : 1 ratio**, with the `large=1` opt-in kept at 2 TiB / 1 TiB /
+  1000 : 1. The frontend threshold rises from 60 GiB to 240 GiB so
+  common system-backup archives no longer trigger the prompt.
+- RAR extraction inherits the new defaults (rar_extract.c threads
+  `c->limits` from the engine — no engine change required).
+- Rationale: the real zip-bomb defence is `check_space()` (statvfs-based
+  real disk-space check before staging) + `max_ratio` (declared
+  compression ratio cap). The size caps are a UX guard, not a security
+  boundary.
+
+## What's new in v1.8.2
+
+- **Default ZIP limits relaxed again** for the 3A-game single-file case.
+  A single ~300 GiB uncompressed file inside an archive was still
+  silently rejected by v1.8.1 (the default scan returns
+  `ZIPX_ERR_LIMIT_FILE_SIZE` before the request ever reaches the
+  frontend confirmation prompt). v1.8.2 raises the default profile to
+  **2 TiB total / 512 GiB per entry / 500 : 1 ratio**, with the `large=1`
+  opt-in bumped to 4 TiB / 1 TiB / 1000 : 1. Frontend threshold rises
+  from 240 GiB to 480 GiB.
+- **Two PS5-only build fixes** discovered when cross-compiling for the
+  PS5 target. The host-side test suite (`tests/run-tests.sh`) had
+  silently accepted both because it links the same sources but uses
+  gcc rather than clang 18 and a different include path:
+  - `Makefile` CFLAGS: add `-Ithird_party/unrar` so `src/rar_extract.c`
+    can find the project-authored `dmc_unrar_api.h` facade header.
+  - `src/extract.c`: move `extract_progress()` definition above
+    `extract_dispatch()` so the implicit function declaration is not
+    flagged by `-Werror=implicit-function-declaration` (clang 18 in the
+    PS5 SDK is stricter than the host gcc used by tests).
+- **Release artifact** for v1.8.2: `web-file-mgr.elf` — 509 704 bytes,
+  sha256 `1b2c3d68b35e32737105f17d14a80a3c159ceca0cabd274ee168cbcd81906f65`,
+  ELF class 64, little-endian, e_machine `0x003e` (x86_64-sie-ps5).
+- Tests: **84 host-side checks** (70 ZIP + 14 RAR), 0 failures. PS5
+  cross-compile succeeds end-to-end.
 
 ## What's new in v1.7
 
@@ -116,7 +158,7 @@ make
 Output:
 
 ```text
-web-file-mgr.elf   (~418 KiB, x86_64-sie-ps5)
+web-file-mgr.elf   (~497 KiB, x86_64-sie-ps5)
 ```
 
 For pure UI/JS work without the PS5 toolchain:
@@ -156,13 +198,13 @@ Plain ZIPs only — stored / deflated / ZIP64, **never encrypted**. The engine i
 | Limit | Default profile | Large profile (`ZIPX_LIMITS_LARGE`) |
 |---|---|---|
 | `max_entries` | 200 000 | 500 000 |
-| `max_total_bytes` (uncompressed) | 1 TiB | 2 TiB |
-| `max_file_bytes` (per entry) | 256 GiB | 1 TiB |
+| `max_total_bytes` (uncompressed) | 2 TiB | 4 TiB |
+| `max_file_bytes` (per entry) | 512 GiB | 1 TiB |
 | `max_ratio` (uncompressed / compressed) | 500 : 1 | 1000 : 1 |
 | `max_depth` (folder nesting) | 32 | 32 |
 | `max_name_len` / `max_path_len` | 255 / 1024 | 255 / 1024 |
 
-The **default profile** is shipped safe: a 4 MiB compressed blob that decodes to 800 GiB is rejected before any output file is opened. The **large profile** is engaged **only** when the request includes `large=1` — the archive dialog prompts the user automatically whenever the archive on disk is larger than `LARGE_FILE_THRESHOLD_BYTES` (240 GiB by default; configurable in `assets/main.js`). Confirming the prompt is the user's explicit opt-in; the server still records nothing extra on its own.
+The **default profile** is shipped safe: a 4 MiB compressed blob that decodes to 800 GiB is rejected before any output file is opened. The **large profile** is engaged **only** when the request includes `large=1` — the archive dialog prompts the user automatically whenever the archive on disk is larger than `LARGE_FILE_THRESHOLD_BYTES` (480 GiB by default; configurable in `assets/main.js`). Confirming the prompt is the user's explicit opt-in; the server still records nothing extra on its own.
 
 ### Security checks
 
@@ -228,14 +270,14 @@ profile table on top. Defaults and the `large=1` opt-in are identical:
 | Limit | Default profile | Large profile (`large=1`) |
 |---|---|---|
 | `max_entries` | 200 000 | 500 000 |
-| `max_total_bytes` (uncompressed) | 1 TiB | 2 TiB |
-| `max_file_bytes` (per entry) | 256 GiB | 1 TiB |
+| `max_total_bytes` (uncompressed) | 2 TiB | 4 TiB |
+| `max_file_bytes` (per entry) | 512 GiB | 1 TiB |
 | `max_ratio` (uncompressed / compressed) | 500 : 1 | 1000 : 1 |
 | `max_depth` (folder nesting) | 32 | 32 |
 | `max_name_len` / `max_path_len` | 255 / 1024 | 255 / 1024 |
 
 Large-profile RAR extraction uses the same `LARGE_FILE_THRESHOLD_BYTES`
-(240 GiB) prompt as ZIP — the frontend treats `.rar` and `.zip` the same
+(480 GiB) prompt as ZIP — the frontend treats `.rar` and `.zip` the same
 way for the prompt, and the server only ever activates the large caps
 when the request carries `large=1` (opt-in).
 
@@ -285,7 +327,7 @@ the step-by-step upgrade recipe.
 After `make`, sanity-check the produced ELF:
 
 ```sh
-ls -la web-file-mgr.elf                            # size ~430 KiB on v1.8 (~418 KiB on v1.7)
+ls -la web-file-mgr.elf                            # size ~497 KiB on v1.8.2 (~427 KiB on v1.8)
 sha256sum web-file-mgr.elf                         # record the digest in your release notes
 file  web-file-mgr.elf                             # expect "ELF 64-bit LSB pie executable, x86-64"
 od -An -tx1 -N20 web-file-mgr.elf | head -2        # magic 7f45 4c46 0201 + e_machine 003e
@@ -301,8 +343,8 @@ A POSIX/host-side C test suite covers the ZIP engine and runs on any Linux / mac
 cd tests && bash run-tests.sh
 ```
 
-Output is a per-case `check`-style report — **83 checks** on the current `main`
-(69 ZIP + 14 RAR). Coverage:
+Output is a per-case `check`-style report — **84 checks** on the current `main`
+(70 ZIP + 14 RAR). Coverage:
 
 - ZIP entry parsing (stored + deflated + ZIP64)
 - Path traversal, absolute paths, backslash, Windows drive letters
@@ -320,7 +362,7 @@ Output is a per-case `check`-style report — **83 checks** on the current `main
 
 ```
 .
-├── Makefile                      # PS5 + Linux builds (VERSION_TAG v1.8)
+├── Makefile                      # PS5 + Linux builds (VERSION_TAG v1.8.2)
 ├── install-libmicrohttpd.sh      # one-shot dependency installer
 ├── gen-asset-module.py           # embeds assets/* as gzip-compressed C arrays
 ├── assets/                       # HTML / CSS / JS / icons / param.json
