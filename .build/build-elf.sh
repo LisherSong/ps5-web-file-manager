@@ -148,10 +148,14 @@ echo "[6/7] make all (增量编译, 复用第三方 obj)..."
 cd "$PROJ"
 export PS5_PAYLOAD_SDK="/opt/ps5-payload-sdk"
 # 仅当二进制缺失或源码变更才全量重编
+# 重要: 必须包含 assets/* 和 gen-asset-module.py —— 它们经 gen-asset-module.py
+# 生成 gen/*.c 进而影响 ELF, 不在列表里就会跳过 make 产生伪"无变更"(v1.8.3
+# 被这个 bug 坑过, ELF sha256 没变)。
 if [ -f web-file-mgr.elf ]; then
   echo "    已存在 web-file-mgr.elf, 检查源码变更..."
   NEEDS_REBUILD=""
-  for src in src/*.c Makefile third_party/minizip-ng/include/*.h third_party/zlib/include/*.h; do
+  for src in src/*.c Makefile assets/* gen-asset-module.py \
+             third_party/minizip-ng/include/*.h third_party/zlib/include/*.h; do
     [ -e "$src" ] || continue
     if [ "$src" -nt web-file-mgr.elf ]; then
       NEEDS_REBUILD="$src"
