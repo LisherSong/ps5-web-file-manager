@@ -14,7 +14,12 @@ BUILD="$ROOT/.build/host-test"
 PYTHON="${PYTHON:-python3}"
 CC="${CC:-gcc}"
 
-rm -rf "$BUILD"
+# Clean previous build outputs without nuking the whole tree (avoids
+# bulk-delete guards); stale fixture copies in work-* dirs are fine because
+# make_fixtures.py rewrites fixtures/ and the suites recreate their workdirs.
+find "$BUILD" -maxdepth 1 -type f -name '*.o' -delete 2>/dev/null || true
+find "$BUILD" -maxdepth 1 -type f -name 'test-*' -delete 2>/dev/null || true
+find "$BUILD" -maxdepth 1 -type f -name '*.log' -delete 2>/dev/null || true
 mkdir -p "$BUILD"
 
 "$PYTHON" "$ROOT/tests/make_fixtures.py"

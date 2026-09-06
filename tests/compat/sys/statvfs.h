@@ -18,16 +18,26 @@ static int
 statvfs(const char *path, struct statvfs *buf) {
   ULARGE_INTEGER total;
   ULARGE_INTEGER free_bytes;
+  char full[MAX_PATH];
   char root[8];
 
-  snprintf(root, sizeof(root), "%.3s", path);
+  /* Resolve to an absolute path first: the drive-letter extraction below
+     only works for "X:\..." style paths, and callers may pass relative
+     paths (e.g. the standalone bigfile_e2e driver). */
+  if(!GetFullPathNameA(path, (DWORD)sizeof(full), full, NULL)) {
+    return -1;
+  }
+  snprintf(root, sizeof(root), "%.3s", full);
   if(!GetDiskFreeSpaceExA(root, &free_bytes, &total, NULL)) {
     return -1;
   }
   memset(buf, 0, sizeof(*buf));
-  buf->f_bsize = 1;
-  buf->f_frsize = 1;
-  buf->f_bavail = free_bytes.QuadPart;
+  /* `unsigned long` is 32-bit on Windows: store free space scaled by 4096
+     so archives up to 16 TiB don't overflow (real 64-bit hosts are LP64
+     and unaffected; PS5 SDK is LP64 too). */
+  buf->f_bsize = 4096;
+  buf->f_frsize = 4096;
+  buf->f_bavail = free_bytes.QuadPart / 4096;
   return 0;
 }
 
