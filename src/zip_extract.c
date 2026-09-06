@@ -766,11 +766,34 @@ scan_archive(void *zip, zipx_ctx_t *c) {
  * extract phase
  **************************************************************************/
 
+/* Builds "<staging>/<rel>[/<leaf>]" for the plain-call fallbacks below.
+   rel may be empty (staging root); leaf may be NULL. */
+static void
+staging_path(const zipx_ctx_t *c, const char *rel, const char *leaf,
+             char *out, size_t cap) {
+  if(rel[0] && leaf) {
+    snprintf(out, cap, "%s/%s/%s", c->staging, rel, leaf);
+  } else if(rel[0]) {
+    snprintf(out, cap, "%s/%s", c->staging, rel);
+  } else if(leaf) {
+    snprintf(out, cap, "%s/%s", c->staging, leaf);
+  } else {
+    snprintf(out, cap, "%s", c->staging);
+  }
+}
+
+/* The *at() family can be present in the target libc yet fail at runtime
+   without setting errno (observed on PS5 hardware: mkdirat() returns -1
+   with errno 0, while plain path-based calls work). Every *at() call in
+   the extract phase therefore falls back to a full-path call built from
+   the staging root before reporting an I/O error. */
+
 /* Opens (creating when needed) every directory of rel below root_fd.
    Returns an open descriptor for the deepest directory. */
 static int
 open_parent_dirs(int root_fd, const char *rel, zipx_ctx_t *c) {
   char buf[ZIPX_PATH_MAX];
+  char cur[ZIPX_PATH_MAX] = "";
   int fd = root_fd;
   char *seg;
   char *save = NULL;
@@ -783,31 +806,48 @@ open_parent_dirs(int root_fd, const char *rel, zipx_ctx_t *c) {
 
   for(seg = strtok_r(buf, "/", &save); seg; seg = strtok_r(NULL, "/", &save)) {
     int next;
+    int made = 0;
+
+    if(cur[0]) {
+      strncat(cur, "/", sizeof(cur) - strlen(cur) - 1);
+    }
+    strncat(cur, seg, sizeof(cur) - strlen(cur) - 1);
 
     if(!mkdirat(fd, seg, 0777)) {
-      next = openat(fd, seg, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-      if(next >= 0) {
-        chmod_0777_fd(next);
-        c->dirs_created++;
+      made = 1;
+    } else if(errno != EEXIST) {
+      char full[ZIPX_PATH_MAX];
+
+      staging_path(c, cur, NULL, full, sizeof(full));
+      if(mkdir(full, 0777) && errno != EEXIST) {
+        ctx_fail(c, ZIPX_ERR_IO, rel, "cannot create directory '%s': %s "
+                 "(errno=%d)", seg, strerror(errno), errno);
+        if(fd != root_fd) {
+          close(fd);
+        }
+        return -1;
       }
-    } else if(errno == EEXIST) {
-      next = openat(fd, seg, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-    } else {
-      ctx_fail(c, ZIPX_ERR_IO, rel, "cannot create directory '%s': %s", seg,
-               strerror(errno));
-      if(fd != root_fd) {
-        close(fd);
-      }
-      return -1;
+      made = 1;
     }
 
+    next = openat(fd, seg, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     if(next < 0) {
-      ctx_fail(c, ZIPX_ERR_IO, rel, "cannot open directory '%s': %s", seg,
-               strerror(errno));
-      if(fd != root_fd) {
-        close(fd);
+      char full[ZIPX_PATH_MAX];
+
+      staging_path(c, cur, NULL, full, sizeof(full));
+      next = open(full, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+      if(next < 0) {
+        ctx_fail(c, ZIPX_ERR_IO, rel, "cannot open directory '%s': %s "
+                 "(errno=%d)", seg, strerror(errno), errno);
+        if(fd != root_fd) {
+          close(fd);
+        }
+        return -1;
       }
-      return -1;
+    }
+    if(made) {
+      chmod_0777_fd(next);
+      c->dirs_created++;
     }
     if(fd != root_fd) {
       close(fd);
@@ -857,7 +897,15 @@ write_entry(void *zip, zipx_ctx_t *c, int root_fd, const char *name,
   snprintf(tmp, sizeof(tmp), "%s%u", ZIPX_PART_PREFIX, ++c->part_counter);
   fd = openat(dir_fd, tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
   if(fd < 0) {
-    ctx_fail(c, ZIPX_ERR_IO, name, "cannot create file: %s", strerror(errno));
+    /* *at() fallback (see open_parent_dirs). */
+    char full[ZIPX_PATH_MAX];
+
+    staging_path(c, dir_part, tmp, full, sizeof(full));
+    fd = open(full, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+  }
+  if(fd < 0) {
+    ctx_fail(c, ZIPX_ERR_IO, name, "cannot create file '%s': %s (errno=%d)",
+             tmp, strerror(errno), errno);
     if(dir_fd != root_fd) {
       close(dir_fd);
     }
@@ -943,15 +991,29 @@ done:
     fd = -1;
   }
   if(!ret && renameat(dir_fd, tmp, dir_fd, base)) {
-    ctx_fail(c, ZIPX_ERR_IO, name, "cannot move file into place: %s",
-             strerror(errno));
-    ret = -1;
+    /* *at() fallback (see open_parent_dirs). */
+    char src_full[ZIPX_PATH_MAX];
+    char dst_full[ZIPX_PATH_MAX];
+
+    staging_path(c, dir_part, tmp, src_full, sizeof(src_full));
+    staging_path(c, dir_part, base, dst_full, sizeof(dst_full));
+    if(rename(src_full, dst_full)) {
+      ctx_fail(c, ZIPX_ERR_IO, name, "cannot move file into place: %s "
+               "(errno=%d)", strerror(errno), errno);
+      ret = -1;
+    }
   }
   if(fd >= 0) {
     close(fd);
   }
   if(ret) {
-    unlinkat(dir_fd, tmp, 0);
+    if(unlinkat(dir_fd, tmp, 0)) {
+      /* *at() fallback (see open_parent_dirs). */
+      char full[ZIPX_PATH_MAX];
+
+      staging_path(c, dir_part, tmp, full, sizeof(full));
+      unlink(full);
+    }
   } else {
     c->files_created++;
   }
