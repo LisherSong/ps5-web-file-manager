@@ -33,6 +33,24 @@ static char g_work[4096];
 static int g_failures;
 static int g_checks;
 
+/* Progress capture: g_pmid_extract is set when a progress event reports a
+   partially complete EXTRACT phase (0 < bytes_done < bytes_total). Before
+   the UCM_PROCESSDATA callback existed the RAR engine only accounted bytes
+   after a whole entry finished, so a single entry spanning volumes produced
+   no mid-file progress at all. */
+static int g_pmid_extract;
+static zipx_progress_t g_last_progress;
+
+static void
+progress_cb(void *userdata, const zipx_progress_t *p) {
+  (void)userdata;
+  g_last_progress = *p;
+  if(p->phase == ZIPX_PHASE_EXTRACT && p->bytes_total > 0 &&
+     p->bytes_done > 0 && p->bytes_done < p->bytes_total) {
+    g_pmid_extract = 1;
+  }
+}
+
 static void
 fixture_path(char *out, size_t size, const char *name) {
   snprintf(out, size, "%s/%s", g_fixtures, name);
@@ -368,7 +386,8 @@ test_real_archives(void) {
   remove_dir(dst);
 
   /* Multi-volume: opening vol.part1.rar must auto-merge part2 from the same
-     directory (unrar drives the volume chain). */
+     directory (unrar drives the volume chain). Also asserts that progress
+     is byte-accurate and updates mid-entry (see progress_cb). */
   work_path(dst, sizeof(dst), "rdst_vol");
   remove_dir(dst);
   {
@@ -378,8 +397,10 @@ test_real_archives(void) {
     fixture_real_path(src, sizeof(src), "vol.part1.rar");
     if(exists(src)) {
       memset(&res, 0, sizeof(res));
+      g_pmid_extract = 0;
+      memset(&g_last_progress, 0, sizeof(g_last_progress));
       st = rar_extract(src, dst, ZIPX_CONFLICT_FAIL,
-                       zipx_default_limits(), NULL, NULL, NULL, &res);
+                       zipx_default_limits(), NULL, progress_cb, NULL, &res);
       check(st == ZIPX_OK, "vol.part1.rar auto-merges volumes");
       if(st == ZIPX_OK) {
         snprintf(checkp, sizeof(checkp), "%s/root.txt", dst);
@@ -387,6 +408,12 @@ test_real_archives(void) {
         snprintf(checkp, sizeof(checkp), "%s/big.bin", dst);
         check(exists(checkp), "  big.bin (split file) present and whole");
         check(res.entries_done >= 2, "  entries_done >= 2");
+        check(g_last_progress.bytes_total > 0,
+              "  progress bytes_total reported");
+        check(g_last_progress.bytes_total == g_last_progress.bytes_done,
+              "  final bytes_done reaches bytes_total");
+        check(g_pmid_extract,
+              "  progress updates mid-entry (not only at entry end)");
       } else {
         printf("    message=%s\n", res.message);
       }

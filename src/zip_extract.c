@@ -49,6 +49,11 @@ static const zipx_limits_t k_default_limits = {
   .max_total_bytes = 2ULL * 1024 * 1024 * 1024 * 1024,
   .max_file_bytes = 512ULL * 1024 * 1024 * 1024,
   .max_ratio = 500,
+  /* Only entries that would individually materialise >=1 GiB are screened
+     by ratio; anything smaller is harmless (bounded by declared size + the
+     real free-space check) and is commonly highly compressible in
+     legitimate archives. */
+  .ratio_min_bytes = 1ULL * 1024 * 1024 * 1024,
   .max_depth = 32,
   .max_name_len = 255,
   .max_path_len = 1024
@@ -69,6 +74,7 @@ static const zipx_limits_t k_large_limits = {
   .max_total_bytes = 4ULL * 1024 * 1024 * 1024 * 1024,
   .max_file_bytes = 1ULL * 1024 * 1024 * 1024 * 1024,
   .max_ratio = 1000,
+  .ratio_min_bytes = 1ULL * 1024 * 1024 * 1024,
   .max_depth = 32,
   .max_name_len = 255,
   .max_path_len = 1024
@@ -721,10 +727,14 @@ scan_archive(void *zip, zipx_ctx_t *c) {
         break;
       }
       if(c->limits.max_ratio && info->compressed_size > 0 &&
+         uncompressed >= c->limits.ratio_min_bytes &&
          uncompressed > (uint64_t)info->compressed_size *
                         c->limits.max_ratio) {
         ret = ctx_fail(c, ZIPX_ERR_LIMIT_RATIO, name,
-                       "compression ratio is above %u", c->limits.max_ratio);
+                       "compression ratio is above %u (%llu -> %llu bytes)",
+                       c->limits.max_ratio,
+                       (unsigned long long)info->compressed_size,
+                       (unsigned long long)uncompressed);
         break;
       }
       if(uncompressed >= c->limits.max_total_bytes ||

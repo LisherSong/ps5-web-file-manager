@@ -462,6 +462,7 @@ test_unsupported(void) {
 
   limits = *base;
   limits.max_ratio = 10;
+  limits.ratio_min_bytes = 1024; /* floor below bomb.zip's 4 MiB */
   expect_status(&res, run("bomb.zip", "out_limit_ratio", ZIPX_CONFLICT_FAIL,
                           &limits, &t, &res),
                 ZIPX_ERR_LIMIT_RATIO, "compression ratio limit enforced");
@@ -562,6 +563,10 @@ test_large_profile(void) {
   check(large->max_total_bytes == 4ULL * 1024 * 1024 * 1024 * 1024,
         "max_total_bytes == 4 TiB");
   check(large->max_ratio == 1000, "max_ratio == 1000");
+  check(large->ratio_min_bytes == base->ratio_min_bytes,
+        "ratio_min_bytes same in both profiles");
+  check(base->ratio_min_bytes == 1ULL * 1024 * 1024 * 1024,
+        "ratio_min_bytes == 1 GiB");
 
   /* Behaviour: medium_bomb.zip is 1 MiB of 0..255 cycled, compressing to
      ~4 KiB (ratio ~238). Default ratio cap 500 accepts it; large ratio
@@ -576,23 +581,37 @@ test_large_profile(void) {
                       ZIPX_CONFLICT_FAIL, large, &t, &res),
             "large ratio cap (1000) accepts medium_bomb.zip (~238:1)");
 
-  /* bomb.zip is 4 MiB of identical 'A' bytes, compressing to ~4 KiB
-     (ratio ~1026). Both default cap 500 and large cap 1000 reject it.
-     A bomb is a bomb regardless of which profile you opt into. */
-  expect_status(&res, run("bomb.zip", "out_ratio_bomb_default",
-                          ZIPX_CONFLICT_FAIL, NULL, &t, &res),
+  /* bomb.zip is 4 MiB of identical 'A' bytes (~1026:1). Although its ratio
+     exceeds both caps, it is far below the 1 GiB ratio_min_bytes floor, so
+     it is accepted: small highly-compressible entries are common in
+     legitimate archives (zero-filled placeholders, sparse blobs) and are
+     harmless because writes are bounded by the declared size plus the real
+     free-space check. A true bomb's claimed size is what check_space() and
+     the total/file caps stop, not a small file's ratio. */
+  expect_ok(&res, run("bomb.zip", "out_ratio_bomb_default",
+                      ZIPX_CONFLICT_FAIL, NULL, &t, &res),
+            "default accepts small high-ratio bomb.zip (below ratio_min_bytes)");
+  expect_ok(&res, run("bomb.zip", "out_ratio_bomb_large",
+                      ZIPX_CONFLICT_FAIL, large, &t, &res),
+            "large accepts small high-ratio bomb.zip (below ratio_min_bytes)");
+
+  /* The ratio screen still fires once the entry clears the floor: lowering
+     the floor below bomb.zip's 4 MiB re-arms the caps. */
+  tight = *base;
+  tight.max_ratio = 500;
+  tight.ratio_min_bytes = 1024;
+  expect_status(&res, run("bomb.zip", "out_ratio_bomb_floor",
+                          ZIPX_CONFLICT_FAIL, &tight, &t, &res),
                 ZIPX_ERR_LIMIT_RATIO,
-                "default ratio cap (500) rejects bomb.zip (~1026:1)");
-  expect_status(&res, run("bomb.zip", "out_ratio_bomb_large",
-                          ZIPX_CONFLICT_FAIL, large, &t, &res),
-                ZIPX_ERR_LIMIT_RATIO,
-                "large ratio cap (1000) rejects bomb.zip (~1026:1)");
+                "ratio enforced once entry clears ratio_min_bytes");
 
   /* Lowering the user's chosen ratio below the medium bomb's actual
-     ratio still rejects the archive. The caps are still enforced; the
-     profile just starts at a higher number. */
+     ratio still rejects the archive (floor disabled to keep the fixture
+     small). The caps are still enforced; the profile just starts at a
+     higher number. */
   tight = *large;
   tight.max_ratio = 200;
+  tight.ratio_min_bytes = 0;
   expect_status(&res, run("medium_bomb.zip", "out_ratio_medium_tight",
                           ZIPX_CONFLICT_FAIL, &tight, &t, &res),
                 ZIPX_ERR_LIMIT_RATIO,

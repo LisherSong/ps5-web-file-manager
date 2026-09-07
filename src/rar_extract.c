@@ -741,12 +741,34 @@ scan_archive(HANDLE hArc, rarx_ctx_t *c) {
  * extract phase
  **************************************************************************/
 
+/* unrar invokes this for every decompressed chunk while RARProcessFile is
+   extracting an entry to disk. Without it the engine could only account
+   bytes_done after a whole entry completed, which froze the progress bar
+   for the entire duration of a multi-GB entry spanning several volumes.
+
+   Returning -1 is how unrar aborts a run, but the break path is only armed
+   when console break handling is enabled, which never happens in DLL mode —
+   so we always return 0 and cancellation stays entry-granular. */
+static int CALLBACK
+rar_data_cb(UINT msg, LPARAM user, LPARAM p1, LPARAM p2) {
+  rarx_ctx_t *c = (rarx_ctx_t *)user;
+  (void)p1;
+
+  if(msg == UCM_PROCESSDATA) {
+    c->bytes_done += (uint64_t)(unsigned long)p2;
+    report(c, ZIPX_PHASE_EXTRACT, NULL, 0);
+  }
+  return 0;
+}
+
 /* unrar extracts each entry directly under the staging root and creates
    parent directories itself. All entry names were validated (normalize_name)
    during scan, so what lands in the staging tree is safe by construction. */
 static int
 extract_archive(HANDLE hArc, rarx_ctx_t *c) {
   int ret = 0;
+
+  RARSetCallback(hArc, rar_data_cb, (LPARAM)(intptr_t)c);
 
   for(;;) {
     struct RARHeaderDataEx hdr;
@@ -803,7 +825,6 @@ extract_archive(HANDLE hArc, rarx_ctx_t *c) {
       c->dirs_created++;
     } else {
       c->files_created++;
-      c->bytes_done += (uint64_t)hdr.UnpSizeHigh << 32 | hdr.UnpSize;
     }
     c->entries_done++;
     report(c, ZIPX_PHASE_EXTRACT, hdr.FileName, 0);

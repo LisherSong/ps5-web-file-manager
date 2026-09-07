@@ -48,6 +48,13 @@ typedef struct {
   uint64_t max_total_bytes;
   uint64_t max_file_bytes;
   uint32_t max_ratio;   /* uncompressed/compressed, 0 disables */
+  /* Entries whose uncompressed size is below this are never ratio-screened.
+     Small highly-compressible entries are common in legitimate archives
+     (zero-filled placeholders, sparse blobs) and are harmless because the
+     actual bytes written are bounded by the declared size and by the real
+     free-space check; the ratio screen only needs to catch entries large
+     enough to matter. */
+  uint64_t ratio_min_bytes;
   uint32_t max_depth;
   uint32_t max_name_len;
   uint32_t max_path_len;
