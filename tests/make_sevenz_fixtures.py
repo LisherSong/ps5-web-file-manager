@@ -176,6 +176,11 @@ VARIANTS: list[tuple[str, list[str], bool, bool]] = [
     ("bcj2",    ["-m0=bcj2", "-m1=lzma2", "-m2=lzma2", "-m3=lzma2", "-m4=lzma2"], False, True),
     ("aes",     ["-m0=lzma2", "-mx5"], True, True),
     ("utf8",    ["-m0=lzma2", "-mx5"], False, True),
+    # Not solid: one folder per file.  That is what exercises the multi-folder
+    # walk and the per-folder slice of the packed-stream table.
+    ("solidoff", ["-m0=lzma2", "-mx5", "-ms=off"], False, True),
+    ("bcj2off", ["-m0=bcj2", "-m1=lzma2", "-m2=lzma2", "-m3=lzma2",
+                 "-m4=lzma2", "-ms=off"], False, True),
 ]
 
 

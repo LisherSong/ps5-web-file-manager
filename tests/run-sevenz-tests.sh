@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Host test runner for the 7z engine (vendor subset + fixture matrix).
+# Host test runner for the 7z engine.
 #
 #   ./tests/run-sevenz-tests.sh
 #
-# Builds the vendored LZMA SDK subset and the end-to-end driver, generates real
-# .7z fixtures with a 7-Zip binary, extracts every fixture and compares the
-# result byte for byte against the source tree.
+# Builds the vendored LZMA SDK subset plus the project's own folder decoder
+# (src/sevenz_chain.c), generates real .7z fixtures with a 7-Zip binary,
+# extracts every fixture through that decoder and compares the result byte for
+# byte against the source tree.
 #
 # On Windows this expects MinGW gcc in PATH and must be started with the MSYS
 # bash explicitly (`/usr/bin/bash tests/run-sevenz-tests.sh`) -- a bare `bash`
@@ -20,10 +21,9 @@ FIXTURES="$ROOT/tests/fixtures-7z"
 PYTHON="${PYTHON:-python3}"
 CC="${CC:-gcc}"
 
-# Archives that the current engine cannot read yet.  Each entry needs a reason;
-# when one of them starts passing the script says so, so the list cannot rot.
-KNOWN_GAPS="bcj2 aes aeshe vol.7z.001"
-#   bcj2        - folder has 5 coders; needs the engine's own chain driver
+# Archives the engine cannot read yet.  Each entry needs a reason; when one of
+# them starts passing the script says so, so the list cannot rot.
+KNOWN_GAPS="aes aeshe vol.7z.001"
 #   aes         - 7zAES coder not implemented yet
 #   aeshe       - encrypted header (-mhe=on), same coder
 #   vol.7z.001  - multi-volume input; needs the volume-set stream
@@ -35,10 +35,16 @@ mkdir -p "$BUILD"
 CFLAGS_7Z=(-O2 -w -DZ7_PPMD_SUPPORT -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
            -DNDEBUG -D_REENTRANT)
 
+VENDOR_OBJS=()
 for src in "$SEVENZ_DIR"/*.c; do
   name="$(basename "$src" .c)"
   "$CC" -c "${CFLAGS_7Z[@]}" -o "$BUILD/$name.o" "$src"
+  VENDOR_OBJS+=("$BUILD/$name.o")
 done
+
+# The engine module is held to the same strictness as the rest of src/.
+"$CC" -c -O2 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE \
+  -I"$SEVENZ_DIR" -o "$BUILD/sevenz_chain.o" "$ROOT/src/sevenz_chain.c"
 
 # unrar-style extra libs are only needed by the Windows path of 7zFile.c.
 EXTRA_LIBS=()
@@ -46,8 +52,14 @@ case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) EXTRA_LIBS=(-lole32 -loleaut32 -luuid -ladvapi32 -luser32 -lshell32) ;;
 esac
 
+"$CC" -O2 -w -I"$SEVENZ_DIR" -I"$ROOT/src" -o "$BUILD/sevenz_chain_e2e" \
+  "$ROOT/tests/sevenz_chain_e2e.c" "$BUILD/sevenz_chain.o" "${VENDOR_OBJS[@]}" \
+  "${EXTRA_LIBS[@]}"
+
+# The SDK-baseline driver is kept buildable: it is the fastest way to tell an
+# engine bug from an SDK one when a fixture starts failing.
 "$CC" -O2 -w -I"$SEVENZ_DIR" -o "$BUILD/sevenz_e2e" \
-  "$ROOT/tests/sevenz_e2e.c" "$BUILD"/*.o "${EXTRA_LIBS[@]}"
+  "$ROOT/tests/sevenz_e2e.c" "${VENDOR_OBJS[@]}" "${EXTRA_LIBS[@]}"
 
 # ---------------------------------------------------------------- fixtures
 if [ ! -f "$FIXTURES/lzma2.7z" ]; then
@@ -71,13 +83,14 @@ is_gap() {
 
 run_case() {
   local name="$1" archive="$2"
-  local out="$BUILD/out/$name"
-  local log="$BUILD/out/$name.log"
+  local out log
 
-  rm -rf "$out"
-  mkdir -p "$out"
+  # A fresh directory per case keeps the run repeatable without deleting a tree
+  # of previous results, which guarded shells refuse to do.
+  out="$(mktemp -d "$BUILD/out/XXXXXX")" || return
+  log="$out.log"
 
-  if "$BUILD/sevenz_e2e" "$archive" "$out" >"$log" 2>&1 &&
+  if "$BUILD/sevenz_chain_e2e" "$archive" "$out" >"$log" 2>&1 &&
      diff -r "$FIXTURES/_src" "$out/_src" >/dev/null 2>&1; then
     if is_gap "$name"; then
       printf '  %-12s GAP CLOSED (remove from KNOWN_GAPS)\n' "$name"
@@ -99,8 +112,8 @@ run_case() {
   fi
 }
 
-echo "== 7z fixture matrix =="
-for a in store lzma2 lzma ppmd bcj delta utf8 bcj2 aes aeshe; do
+echo "== 7z fixture matrix (engine: src/sevenz_chain.c) =="
+for a in store lzma2 lzma ppmd bcj delta utf8 bcj2 solidoff bcj2off aes aeshe; do
   [ -f "$FIXTURES/$a.7z" ] || continue
   run_case "$a" "$FIXTURES/$a.7z"
 done
