@@ -9,7 +9,6 @@
 #include <strings.h>
 #include <sys/stat.h>
 
-#include "zipx_volstream.h"
 #include "zipx_volume.h"
 
 typedef struct {

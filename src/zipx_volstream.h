@@ -25,12 +25,11 @@
 
 #include <stdint.h>
 
+#include "zipx_volume.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#define ZIPX_VOL_MODE_CONCAT 0
-#define ZIPX_VOL_MODE_DISK   1
 
 /* Creates a stream handle; pass it to mz_stream_open() afterwards. */
 void *zipx_volstream_create(int32_t mode);

@@ -23,10 +23,9 @@ CC="${CC:-gcc}"
 
 # Archives the engine cannot read yet.  Each entry needs a reason; when one of
 # them starts passing the script says so, so the list cannot rot.
-KNOWN_GAPS="aes aeshe vol.7z.001"
+KNOWN_GAPS="aes aeshe"
 #   aes         - 7zAES coder not implemented yet
 #   aeshe       - encrypted header (-mhe=on), same coder
-#   vol.7z.001  - multi-volume input; needs the volume-set stream
 
 find "$BUILD" -maxdepth 1 -type f \( -name '*.o' -o -name '*.exe' \) -delete 2>/dev/null || true
 mkdir -p "$BUILD"
@@ -42,9 +41,20 @@ for src in "$SEVENZ_DIR"/*.c; do
   VENDOR_OBJS+=("$BUILD/$name.o")
 done
 
-# The engine module is held to the same strictness as the rest of src/.
+# The engine modules are held to the same strictness as the rest of src/.
+# sevenz_volstream reuses the ZIP side's volume-set detector, so zipx_volume
+# is built here as well.
 "$CC" -c -O2 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE \
-  -I"$SEVENZ_DIR" -o "$BUILD/sevenz_chain.o" "$ROOT/src/sevenz_chain.c"
+  -I"$SEVENZ_DIR" -I"$ROOT/src" -o "$BUILD/sevenz_chain.o" \
+  "$ROOT/src/sevenz_chain.c"
+"$CC" -c -O2 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE \
+  -I"$SEVENZ_DIR" -I"$ROOT/src" -o "$BUILD/sevenz_volstream.o" \
+  "$ROOT/src/sevenz_volstream.c"
+"$CC" -c -O2 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE \
+  -I"$ROOT/src" -o "$BUILD/zipx_volume.o" "$ROOT/src/zipx_volume.c"
+
+ENGINE_OBJS=("$BUILD/sevenz_chain.o" "$BUILD/sevenz_volstream.o"
+             "$BUILD/zipx_volume.o")
 
 # unrar-style extra libs are only needed by the Windows path of 7zFile.c.
 EXTRA_LIBS=()
@@ -53,7 +63,7 @@ case "$(uname -s)" in
 esac
 
 "$CC" -O2 -w -I"$SEVENZ_DIR" -I"$ROOT/src" -o "$BUILD/sevenz_chain_e2e" \
-  "$ROOT/tests/sevenz_chain_e2e.c" "$BUILD/sevenz_chain.o" "${VENDOR_OBJS[@]}" \
+  "$ROOT/tests/sevenz_chain_e2e.c" "${ENGINE_OBJS[@]}" "${VENDOR_OBJS[@]}" \
   "${EXTRA_LIBS[@]}"
 
 # The SDK-baseline driver is kept buildable: it is the fastest way to tell an

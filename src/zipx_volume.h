@@ -22,6 +22,14 @@ extern "C" {
 
 #define ZIPX_VOL_MAX_PARTS 512
 
+/* How the set is split. A byte split (`name.zip.001`, `name.7z.001`,
+   `name.part1.zip`) is the concatenation of its parts with absolute offsets;
+   zip split disks (`name.z01` + `name.zip`) store per-disk offsets instead.
+   The constants live here because they describe the *set*, and every consumer
+   of zipx_volume_t needs them. */
+#define ZIPX_VOL_MODE_CONCAT 0
+#define ZIPX_VOL_MODE_DISK   1
+
 typedef struct {
   char **paths;   /* ordered part paths, owned by this struct */
   int count;

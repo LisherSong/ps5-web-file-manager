@@ -33,6 +33,7 @@
 #include "7zFile.h"
 
 #include "sevenz_chain.h"
+#include "sevenz_volstream.h"
 
 #define INPUT_BUF_SIZE (1u << 18)
 #define MAX_PATH_LEN 4096
@@ -152,19 +153,19 @@ static void utf16_to_utf8(const UInt16 *src, char *dst, size_t dst_size) {
 /* --------------------------------------------------------------- reader */
 
 typedef struct {
-  CSzFile *file;
+  ISeekInStream *stream;
   UInt64 base; /* db.dataPos: packed offsets are relative to it */
 } reader_ctx;
 
 static int reader_at(void *ctx, uint64_t offset, void *dst, size_t size) {
   reader_ctx *r = (reader_ctx *)ctx;
-  UInt64 pos = r->base + offset;
+  Int64 pos = (Int64)(r->base + offset);
   size_t done = 0;
 
-  if(File_Seek(r->file, (Int64 *)&pos, SZ_SEEK_SET) != 0) return -1;
+  if(r->stream->Seek(r->stream, &pos, SZ_SEEK_SET) != SZ_OK) return -1;
   while(done < size) {
     size_t want = size - done;
-    if(File_Read(r->file, (Byte *)dst + done, &want) != 0) return -1;
+    if(r->stream->Read(r->stream, (Byte *)dst + done, &want) != SZ_OK) return -1;
     if(want == 0) return -1;
     done += want;
   }
@@ -334,13 +335,16 @@ static int sink_write(void *ctx, const void *data, size_t size) {
 /* ------------------------------------------------------------------ main */
 
 int main(int argc, char **argv) {
-  CFileInStream archive_stream;
   CLookToRead2 look_stream;
   CSzArEx db;
   SRes res;
   UInt32 folder;
   reader_ctx reader;
   sink_ctx sink;
+  sevenz_volstream *vol = NULL;
+  char *vol_err = NULL;
+  char vol_desc[512];
+  int is_set = 0;
   int rc = 0;
 
   if(argc < 3) {
@@ -348,21 +352,22 @@ int main(int argc, char **argv) {
     return 2;
   }
 
-  if(InFile_Open(&archive_stream.file, argv[1]) != 0) {
-    fprintf(stderr, "cannot open %s\n", argv[1]);
+  if(sevenz_volstream_open(&vol, argv[1], &is_set, &vol_err) != 0) {
+    fprintf(stderr, "%s\n", vol_err ? vol_err : "cannot open the archive");
+    free(vol_err);
     return 1;
   }
-  FileInStream_CreateVTable(&archive_stream);
-  archive_stream.wres = 0;
+  sevenz_volstream_describe(vol, vol_desc, sizeof(vol_desc));
 
   LookToRead2_CreateVTable(&look_stream, 0);
   look_stream.buf = (Byte *)ISzAlloc_Alloc(&g_alloc, INPUT_BUF_SIZE);
   if(!look_stream.buf) {
     fprintf(stderr, "out of memory\n");
+    sevenz_volstream_free(vol);
     return 1;
   }
   look_stream.bufSize = INPUT_BUF_SIZE;
-  look_stream.realStream = &archive_stream.vt;
+  look_stream.realStream = sevenz_volstream_stream(vol);
   LookToRead2_INIT(&look_stream)
 
   CrcGenerateTable();
@@ -370,11 +375,14 @@ int main(int argc, char **argv) {
 
   res = SzArEx_Open(&db, &look_stream.vt, &g_alloc, &g_temp);
   if(res != SZ_OK) {
-    fprintf(stderr, "SzArEx_Open failed: res=%d\n", (int)res);
+    fprintf(stderr, "%s: cannot read the 7z header (res=%d)\n", vol_desc,
+            (int)res);
+    sevenz_volstream_free(vol);
     return 1;
   }
 
-  printf("entries: %u, folders: %u, packed streams: %u\n",
+  printf("archive: %s, %llu bytes, entries: %u, folders: %u, packed streams: %u\n",
+         vol_desc, (unsigned long long)sevenz_volstream_size(vol),
          (unsigned)db.NumFiles, (unsigned)db.db.NumFolders,
          (unsigned)db.db.NumPackStreams);
 
@@ -382,7 +390,7 @@ int main(int argc, char **argv) {
   sink.db = &db;
   snprintf(sink.out_dir, sizeof(sink.out_dir), "%s", argv[2]);
 
-  reader.file = &archive_stream.file;
+  reader.stream = sevenz_volstream_stream(vol);
   reader.base = db.dataPos;
 
   for(folder = 0; folder < db.db.NumFolders; folder++) {
@@ -468,7 +476,7 @@ int main(int argc, char **argv) {
 
   ISzAlloc_Free(&g_alloc, look_stream.buf);
   SzArEx_Free(&db, &g_alloc);
-  File_Close(&archive_stream.file);
+  sevenz_volstream_free(vol);
 
   printf("%s: %d failure(s)\n", argv[1], g_failures);
   return rc ? 1 : 0;
