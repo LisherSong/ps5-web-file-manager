@@ -17,6 +17,14 @@ web-file-mgr-linux
 .build/*.c
 .build/test-out.txt
 
+# 7z work area: downloaded SDK + 7-Zip binaries and local build output.
+.build/7zdl/
+.build/7zh/
+.build/sevenz-test/
+
+# Generated 7z fixtures (tests/make_sevenz_fixtures.py rebuilds them).
+tests/fixtures-7z/
+
 # Editor / OS noise
 .vscode/
 .idea/

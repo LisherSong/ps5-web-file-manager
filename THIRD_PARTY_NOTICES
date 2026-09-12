@@ -2,7 +2,7 @@ Third-Party Notices
 ===================
 
 This project vendors a minimal set of third-party source files under
-`third_party/` to provide the ZIP and RAR extraction features (the
+`third_party/` to provide the ZIP, RAR and 7z extraction features (the
 `/api/extract` endpoint). Their full license texts are included
 alongside the sources.
 
@@ -32,6 +32,21 @@ alongside the sources.
              relaxed warnings; unrar_c_api.h is project-authored and
              carries the project's license)
 
+4. LZMA SDK (7z decoder)
+   ----------------------
+   Version : 26.03 (2026-09-03)
+   Source  : https://www.7-zip.org/sdk.html — release `lzma2603.7z` from
+             https://github.com/ip7z/7zip/releases
+   License : Public domain ("LZMA SDK is written and placed in the public
+             domain by Igor Pavlov", see third_party/7z/DOC/lzma-sdk.txt)
+   Files   : third_party/7z/** (decoder-only subset, compiled with relaxed
+             warnings; see third_party/7z/README.md for the file list)
+
+The LZMA SDK is the engine behind `src/sevenz_extract.c` (the v1.9.x 7z
+support: LZMA/LZMA2/PPMd/Copy plus the BCJ, BCJ2 and Delta filters). Only the
+C implementation is used — it builds with the plain PS5 C toolchain and does
+not pull in the C++ runtime. The encoder half of the SDK is not vendored.
+
 unrar is the engine behind `src/rar_extract.c` (the v1.9 RAR support: RAR4,
 RAR5 including WinRAR 6/7 "v6" compression, and multi-volume archives; the
 engine can also decrypt via RARSetPassword once a password channel is wired
@@ -46,5 +61,6 @@ replaced by the rarlab UnRAR source in v1.9; see git history under
 Libraries in sections 1 and 2 are distributed under the zlib license, which
 permits redistribution in source and binary form provided the copyright
 notice and this list of conditions are retained. unrar is distributed under
-its own freeware terms. See the individual LICENSE / license.txt files in
+its own freeware terms. The LZMA SDK (section 4) is in the public domain and
+carries no conditions. See the individual LICENSE / license.txt files in
 each `third_party/` subdirectory for the complete terms.
