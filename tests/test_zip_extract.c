@@ -59,9 +59,23 @@ read_text(const char *path, char *buf, size_t size) {
   return 0;
 }
 
+/* Reads binary content (entries may contain NUL bytes, so read_text cannot be
+   used to verify them). Returns the number of bytes read, or -1. */
+static long
+read_bytes(const char *path, unsigned char *buf, size_t size) {
+  FILE *f = fopen(path, "rb");
+  size_t n;
+
+  if(!f) {
+    return -1;
+  }
+  n = fread(buf, 1, size, f);
+  fclose(f);
+  return (long)n;
+}
+
 static int
-remove_dir(const char *path) {
-  DIR *dir = opendir(path);
+remove_dir(const char *path) {  DIR *dir = opendir(path);
   struct dirent *ent;
 
   if(!dir) {
@@ -195,6 +209,111 @@ expect_status(zipx_result_t *res, zipx_status_t status,
            zipx_status_string(expected), zipx_status_string(status), status,
            res->message, res->detail);
   }
+}
+
+/**************************************************************************/
+
+/* Verifies the entries all three split layouts share: the same archive was
+   sliced three ways, so every extraction has to produce identical content. */
+static void
+check_split_content(const char *dst_name, const char *label) {
+  static unsigned char data[16384];
+  char dst[4096];
+  char file[4224];
+  char buf[512];
+  long n;
+  size_t i;
+  int ok = 1;
+
+  work_path(dst, sizeof(dst), dst_name);
+  check(exists(dst), label);
+
+  snprintf(file, sizeof(file), "%s/readme.txt", dst);
+  n = read_bytes(file, (unsigned char *)buf, sizeof(buf));
+  check(n == 440 && !memcmp(buf, "split archive fixture\n", 22),
+        "  readme.txt content");
+
+  snprintf(file, sizeof(file), "%s/sub/data.bin", dst);
+  n = read_bytes(file, data, 10240);
+  if(n != 10240) {
+    ok = 0;
+  } else {
+    for(i = 0; i < 10240; i++) {
+      if(data[i] != (unsigned char)(i % 256)) {
+        ok = 0;
+        break;
+      }
+    }
+  }
+  check(ok, "  sub/data.bin binary content (10 KiB across volumes)");
+
+  snprintf(file, sizeof(file), "%s/sub/deep/more.bin", dst);
+  n = read_bytes(file, data, 12000);
+  check(n == 12000 && data[0] == 'A' && data[3] == 'D',
+        "  sub/deep/more.bin content");
+}
+
+static void
+test_volumes(void) {
+  zipx_result_t res;
+  test_ctx_t t = {0};
+  char dst[4096];
+
+  printf("split volumes\n");
+
+  /* name.zip.001 style (7-Zip byte split), picked from the first volume. */
+  expect_ok(&res, run("plain.zip.001", "out_vol_plain_a", ZIPX_CONFLICT_FAIL,
+                      NULL, &t, &res),
+            "byte split: extract from part 001");
+  check_split_content("out_vol_plain_a", "  output tree exists");
+
+  /* Same set, but the user clicked the last volume this time. */
+  expect_ok(&res, run("plain.zip.003", "out_vol_plain_b", ZIPX_CONFLICT_FAIL,
+                      NULL, &t, &res),
+            "byte split: extract from part 003");
+  check_split_content("out_vol_plain_b", "  output tree exists");
+
+  /* name.partN.zip style, picked from the middle volume. */
+  expect_ok(&res, run("parts.part2.zip", "out_vol_parts", ZIPX_CONFLICT_FAIL,
+                      NULL, &t, &res),
+            "partN split: extract from part2");
+  check_split_content("out_vol_parts", "  output tree exists");
+
+  /* name.z01 ... name.zip: offsets are relative to each disk, so this one
+     exercises the disk-aware volume stream. */
+  expect_ok(&res, run("disks.z01", "out_vol_disks_a", ZIPX_CONFLICT_FAIL,
+                      NULL, &t, &res),
+            "split disks: extract from z01");
+  check_split_content("out_vol_disks_a", "  output tree exists");
+
+  expect_ok(&res, run("disks.zip", "out_vol_disks_b", ZIPX_CONFLICT_FAIL,
+                      NULL, &t, &res),
+            "split disks: extract from the final volume");
+  check_split_content("out_vol_disks_b", "  output tree exists");
+
+  /* A plain archive must still take the ordinary path. */
+  expect_ok(&res, run("split_single.zip", "out_vol_single", ZIPX_CONFLICT_FAIL,
+                      NULL, &t, &res),
+            "plain archive still extracts (no volume set detected)");
+  check_split_content("out_vol_single", "  output tree exists");
+
+  /* Broken sets must fail with the exact missing volume, not a vague error. */
+  expect_status(&res, run("gap.zip.001", "out_vol_gap", ZIPX_CONFLICT_FAIL,
+                          NULL, &t, &res),
+                ZIPX_ERR_OPEN, "incomplete set: reported as an open failure");
+  check(strstr(res.message, "gap.zip.002") != NULL,
+        "  error names the missing volume");
+  printf("       message: %s\n", res.message);
+
+  expect_status(&res, run("broken.zip.001", "out_vol_broken", ZIPX_CONFLICT_FAIL,
+                          NULL, &t, &res),
+                ZIPX_ERR_OPEN, "lone first volume: reported as an open failure");
+  check(strstr(res.message, "no other volumes") != NULL,
+        "  error says the remaining volumes are missing");
+  printf("       message: %s\n", res.message);
+
+  work_path(dst, sizeof(dst), "out_vol_gap");
+  check(!exists(dst), "nothing was written for the incomplete set");
 }
 
 /**************************************************************************/
@@ -655,6 +774,7 @@ main(int argc, char **argv) {
   test_cancel();
   test_many_files();
   test_large_profile();
+  test_volumes();
 
   printf("\n%d checks, %d failures\n", g_checks, g_failures);
   return g_failures ? 1 : 0;

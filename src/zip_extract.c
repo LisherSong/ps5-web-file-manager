@@ -22,6 +22,9 @@
 #include "mz_strm.h"
 #include "mz_strm_os.h"
 
+#include "zipx_volume.h"
+#include "zipx_volstream.h"
+
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
 #endif
@@ -1248,6 +1251,76 @@ publish_staging(zipx_ctx_t *c, const char *dst_dir, int dst_existed) {
  * public entry point
  **************************************************************************/
 
+/* Opens the archive for scanning. A split set is served by the volume stream;
+   because tools disagree on whether a split keeps absolute offsets or offsets
+   relative to each volume, both layouts are attempted before giving up. */
+static int
+open_archive(const char *zip_path, zipx_volume_t *vol, int vol_set,
+             zipx_ctx_t *c, void **zip_out, void **stream_out) {
+  int attempts = vol_set ? 2 : 1;
+  int attempt;
+
+  for(attempt = 0; attempt < attempts; attempt++) {
+    void *stream = NULL;
+    void *zip = NULL;
+    int rc;
+
+    if(vol_set) {
+      int mode = vol->mode;
+
+      if(attempt == 1) {
+        mode = (vol->mode == ZIPX_VOL_MODE_DISK) ? ZIPX_VOL_MODE_CONCAT
+                                                 : ZIPX_VOL_MODE_DISK;
+      }
+      stream = zipx_volstream_create(mode);
+      if(stream && zipx_volstream_set_parts(
+                     stream, (const char *const *)vol->paths,
+                     vol->count) != MZ_OK) {
+        zipx_volstream_delete(&stream);
+        stream = NULL;
+      }
+    } else {
+      stream = mz_stream_os_create();
+    }
+    zip = mz_zip_create();
+    if(!stream || !zip) {
+      if(stream) {
+        mz_stream_delete(&stream);
+      }
+      if(zip) {
+        mz_zip_delete(&zip);
+      }
+      ctx_fail(c, ZIPX_ERR_INTERNAL, zip_path, "out of memory");
+      return (int)c->result->status;
+    }
+    rc = mz_stream_open(stream, vol_set ? vol->paths[0] : zip_path,
+                        MZ_OPEN_MODE_READ);
+    if(rc == MZ_OK) {
+      rc = mz_zip_open(zip, stream, MZ_OPEN_MODE_READ);
+    }
+    if(rc == MZ_OK) {
+      *zip_out = zip;
+      *stream_out = stream;
+      return ZIPX_OK;
+    }
+    /* Wrong layout for this set (or a corrupt archive): drop it and retry. */
+    mz_zip_close(zip);
+    mz_zip_delete(&zip);
+    mz_stream_close(stream);
+    mz_stream_delete(&stream);
+  }
+
+  if(vol_set) {
+    ctx_fail(c, ZIPX_ERR_OPEN, zip_path,
+             "cannot read the split archive starting at '%s' (%d volumes): %s",
+             vol->paths[0], vol->count,
+             errno ? strerror(errno) : "no known volume layout matched");
+  } else {
+    ctx_fail(c, ZIPX_ERR_OPEN, zip_path, "%s", strerror(errno ? errno : EIO));
+  }
+  return (int)c->result->status;
+}
+
 zipx_status_t
 zipx_extract(const char *zip_path, const char *dst_dir,
              zipx_conflict_t conflict, const zipx_limits_t *limits,
@@ -1263,6 +1336,8 @@ zipx_extract(const char *zip_path, const char *dst_dir,
   int root_fd = -1;
   int dst_existed = 0;
   int status = ZIPX_OK;
+  zipx_volume_t vol;
+  int vol_set = 0;
 
   if(!result || !zip_path || !dst_dir || !dst_dir[0]) {
     if(result) {
@@ -1274,6 +1349,8 @@ zipx_extract(const char *zip_path, const char *dst_dir,
   }
 
   memset(&ctx, 0, sizeof(ctx));
+  memset(&vol, 0, sizeof(vol));
+  vol.index = -1;
   memset(result, 0, sizeof(*result));
   c->result = result;
   c->conflict = conflict;
@@ -1305,16 +1382,25 @@ zipx_extract(const char *zip_path, const char *dst_dir,
     goto done;
   }
 
-  stream = mz_stream_os_create();
-  zip = mz_zip_create();
-  if(!stream || !zip) {
-    status = ctx_fail(c, ZIPX_ERR_INTERNAL, zip_path, "out of memory");
-    goto done;
+  {
+    char *vol_err = NULL;
+    int vrc = zipx_volume_detect(zip_path, &vol, &vol_err);
+
+    if(vrc < 0) {
+      /* A volume of a set that is incomplete gets a precise message here
+         instead of a generic "cannot open" further down. */
+      status = ctx_fail(c, ZIPX_ERR_OPEN, zip_path, "%s",
+                        vol_err ? vol_err : "cannot read the volume set");
+      free(vol_err);
+      goto done;
+    }
+    free(vol_err);
+    if(vrc > 0) {
+      vol_set = 1;
+    }
   }
-  if(mz_stream_open(stream, zip_path, MZ_OPEN_MODE_READ) ||
-     mz_zip_open(zip, stream, MZ_OPEN_MODE_READ)) {
-    status = ctx_fail(c, ZIPX_ERR_OPEN, zip_path, "%s",
-                      strerror(errno ? errno : EIO));
+  status = open_archive(zip_path, &vol, vol_set, c, &zip, &stream);
+  if(status != ZIPX_OK) {
     goto done;
   }
 
@@ -1375,6 +1461,7 @@ done:
     mz_stream_close(stream);
     mz_stream_delete(&stream);
   }
+  zipx_volume_free(&vol);
   result->entries_total = c->entries_total;
   result->entries_done = c->entries_done;
   result->bytes_total = c->bytes_total;

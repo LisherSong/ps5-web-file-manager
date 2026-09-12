@@ -1,5 +1,6 @@
 #include "filemgr.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -15,6 +16,7 @@
 #include "path_util.h"
 #include "rar_extract.h"
 #include "zip_extract.h"
+#include "zipx_volume.h"
 
 /* Cancellation callback: stop when the task is asked to cancel. */
 static int
@@ -67,11 +69,135 @@ extract_progress(void *userdata, const zipx_progress_t *p) {
               delta, NULL);
 }
 
+/* Case-insensitive substring search (strcasestr is not available on MinGW). */
+static const char *
+ci_strstr(const char *hay, const char *needle) {
+  size_t nlen = strlen(needle);
+  const char *p;
+
+  if(!nlen) {
+    return hay;
+  }
+  for(p = hay; *p; p++) {
+    size_t i;
+
+    for(i = 0; i < nlen; i++) {
+      if(!p[i] ||
+         tolower((unsigned char)p[i]) != tolower((unsigned char)needle[i])) {
+        break;
+      }
+    }
+    if(i == nlen) {
+      return p;
+    }
+  }
+  return NULL;
+}
+
+static void
+extract_set_detail(zipx_result_t *result, const char *text) {
+  size_t len = strlen(text);
+
+  if(len > sizeof(result->detail) - 1) {
+    len = sizeof(result->detail) - 1;
+  }
+  memcpy(result->detail, text, len);
+  result->detail[len] = 0;
+}
+
+/* Which engine a volume set belongs to, decided from the member names:
+   0 zip, 1 rar, 2 7z, -1 unknown. */
+static int
+volume_format(const zipx_volume_t *vol) {
+  static const char *const exts[] = { ".zip", ".rar", ".7z", NULL };
+  const char *best = NULL;
+  int best_kind = -1;
+  int i;
+  int j;
+
+  for(i = 0; i < vol->count; i++) {
+    for(j = 0; exts[j]; j++) {
+      const char *hit = ci_strstr(vol->paths[i], exts[j]);
+
+      if(hit && (!best || hit > best)) {
+        best = hit;
+        best_kind = j;
+      }
+    }
+  }
+  return best_kind;
+}
+
+/* Removes the source archive once a task is done with it. For a split set
+   every volume has to go: leaving the other parts behind would leave the user
+   with something that still looks like a usable archive. */
+static void
+remove_source_archives(const char *path) {
+  zipx_volume_t vol;
+  char *err = NULL;
+  int rc = zipx_volume_detect(path, &vol, &err);
+  int i;
+
+  free(err);
+  if(rc > 0) {
+    for(i = 0; i < vol.count; i++) {
+      unlink(vol.paths[i]);
+    }
+    zipx_volume_free(&vol);
+    return;
+  }
+  unlink(path);
+}
+
 /* Pick the right engine by the archive file name. Returns ZIPX_ERR_FORMAT
    for anything that does not look like a supported archive. */
 static zipx_status_t
 extract_dispatch(file_task_t *task, zipx_conflict_t conflict,
                 const zipx_limits_t *limits, zipx_result_t *result) {
+  zipx_volume_t vol;
+  char *vol_err = NULL;
+  int vrc = zipx_volume_detect(task->src, &vol, &vol_err);
+  int kind = vrc > 0 ? volume_format(&vol) : -1;
+
+  if(vrc < 0) {
+    /* A broken set gets the precise reason (which volume is missing, ...)
+       instead of a generic "unsupported format". */
+    extract_set_detail(result, task->src);
+    snprintf(result->message, sizeof(result->message), "%s",
+             vol_err ? vol_err : "the archive volumes are incomplete");
+    free(vol_err);
+    return ZIPX_ERR_OPEN;
+  }
+  free(vol_err);
+  if(vrc > 0) {
+    zipx_status_t status;
+
+    if(kind == 0) {
+      status = zipx_extract(task->src, task->dst, conflict, limits,
+                            extract_cancel, extract_progress, task, result);
+    } else if(kind == 1) {
+      /* unrar chains its own volume naming (x.part1.rar); a byte contiguous
+         set named x.rar.001 cannot be handed to it as-is. */
+      extract_set_detail(result, task->src);
+      snprintf(result->message, sizeof(result->message),
+               "RAR volume sets named 'x.rar.001' are not supported yet "
+               "(rename the parts to 'x.part1.rar', 'x.part2.rar', ...)");
+      status = ZIPX_ERR_UNSUPPORTED;
+    } else if(kind == 2) {
+      extract_set_detail(result, task->src);
+      snprintf(result->message, sizeof(result->message),
+               "7z archives are not supported yet (repack as .zip or .rar)");
+      status = ZIPX_ERR_UNSUPPORTED;
+    } else {
+      extract_set_detail(result, task->src);
+      snprintf(result->message, sizeof(result->message),
+               "unsupported split archive (only .zip, .rar and .7z volumes "
+               "are recognised)");
+      status = ZIPX_ERR_UNSUPPORTED;
+    }
+    zipx_volume_free(&vol);
+    return status;
+  }
   if(ends_with_ci(task->src, ".zip")) {
     return zipx_extract(task->src, task->dst, conflict, limits,
                         extract_cancel, extract_progress, task, result);
@@ -80,17 +206,10 @@ extract_dispatch(file_task_t *task, zipx_conflict_t conflict,
     return rar_extract(task->src, task->dst, conflict, limits,
                        extract_cancel, extract_progress, task, result);
   }
-  {
-    size_t len = strlen(task->src);
-    if(len > sizeof(result->detail) - 1) {
-      len = sizeof(result->detail) - 1;
-    }
-    memcpy(result->detail, task->src, len);
-    result->detail[len] = 0;
-    snprintf(result->message, sizeof(result->message),
-             "unsupported archive format (only .zip and .rar are accepted)");
-    return ZIPX_ERR_UNSUPPORTED;
-  }
+  extract_set_detail(result, task->src);
+  snprintf(result->message, sizeof(result->message),
+           "unsupported archive format (only .zip and .rar are accepted)");
+  return ZIPX_ERR_UNSUPPORTED;
 }
 
 static const char *
@@ -170,7 +289,7 @@ extract_worker(void *arg) {
 
     /* Only delete the source archive when this task owns it (upload flow). */
     if(task->extract_remove_source && task->src[0]) {
-      unlink(task->src);
+      remove_source_archives(task->src);
     }
     pthread_mutex_lock(&g_tasks_lock);
     task->state = TASK_DONE;

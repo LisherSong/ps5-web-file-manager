@@ -773,9 +773,21 @@ function isRarSubVolume(item) {
   return false;
 }
 
+function isZipSplitVolume(item) {
+  if (item.type !== "-") return false;
+  const name = item.name;
+  // 分卷 ZIP 的任意一卷都能解压（引擎会自己找齐同目录的其余分卷）：
+  // name.zip.001…（7-Zip）/ name.part1.zip…（WinRAR）/ name.z01…+name.zip（Info-ZIP）
+  if (/\.zip\.0*\d+$/i.test(name)) return true;
+  if (/\.part0*\d+\.zip$/i.test(name)) return true;
+  if (/\.z0*\d+$/i.test(name)) return true;
+  return false;
+}
+
 function isExtractableArchive(item) {
   if (item.type !== "-") return false;
   if (/\.zip$/i.test(item.name)) return true;
+  if (isZipSplitVolume(item)) return true;
   if (isRarMainVolume(item)) return true;
   return false;
 }

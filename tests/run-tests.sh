@@ -23,6 +23,7 @@ find "$BUILD" -maxdepth 1 -type f -name '*.log' -delete 2>/dev/null || true
 mkdir -p "$BUILD"
 
 "$PYTHON" "$ROOT/tests/make_fixtures.py"
+"$PYTHON" "$ROOT/tests/make_split_fixtures.py"
 
 MZ_CFLAGS=(-I"$ROOT/third_party/minizip-ng/include" -DHAVE_ZLIB -DZLIB_COMPAT -D_FILE_OFFSET_BITS=64)
 RAR_CFLAGS=(-I"$ROOT/third_party/unrar" -DDMC_UNRAR_DISABLE_BE32TOH_BE64TOH=1)
@@ -65,6 +66,16 @@ COMPAT_INC="$ROOT/tests/compat"
   -I"$ROOT/third_party/minizip-ng/include" -I"$ROOT/src" -I"$COMPAT_INC" \
   -include "$ROOT/tests/posix_compat.h" \
   -o "$BUILD/zip_extract.o" "$ROOT/src/zip_extract.c"
+
+# Volume support: the concatenating stream and the volume set detector.
+"$CC" -c -O2 -Wall -Wextra -Wno-unused-parameter \
+  -I"$ROOT/third_party/minizip-ng/include" -I"$ROOT/src" -I"$COMPAT_INC" \
+  -include "$ROOT/tests/posix_compat.h" \
+  -o "$BUILD/zipx_volstream.o" "$ROOT/src/zipx_volstream.c"
+
+"$CC" -c -O2 -Wall -Wextra -Wno-unused-parameter -I"$ROOT/src" \
+  -I"$COMPAT_INC" -include "$ROOT/tests/posix_compat.h" \
+  -o "$BUILD/zipx_volume.o" "$ROOT/src/zipx_volume.c"
 
 "$CC" -c -O2 -Wall -Wextra -Wno-unused-parameter \
   -I"$ROOT/third_party/minizip-ng/include" -I"$ROOT/third_party/unrar7" -I"$ROOT/src" -I"$COMPAT_INC" \
