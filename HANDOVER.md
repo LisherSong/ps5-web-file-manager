@@ -1,9 +1,9 @@
 # 交接文档 — ps5-web-file-manager 工作进度
 
-> 交接时间：2026-09-12（晚） · 分支 main · 最新提交 **8bee84b** · tag v1.9 已打（未 push）· v1.9.1 待真机验证后打
+> 交接时间：2026-09-13（午） · 分支 main · 最新提交 **00b750d** · tag v1.9.1 待真机验证后打
 >
 > **当前主线任务（用户 2026-09-12 指令）**：ZIP/RAR/7z × 单卷/分卷 = 六种组合全部支持 + 密码通道补齐 + 报错信息尽量详细准确。
-> 进度：**① ZIP 分卷 ✅ 已完成（da565cc）** → ② 7z 引擎（基建 🔧 8bee84b） → ③ 7z 分卷 → ④ 六组合收口 → ⑤ 密码通道
+> 进度：**①②③ 全部 ✅**（da565cc / 8bee84b~9b2f5a0 / 2748b38）· ④ **✅**（200b386 dispatch+识别+密码 UI）· ⑤ **✅**（4da345a 7zAES）· ⑥ **贯穿**（112f8a6 + 021c9cb 错误透传 + 文案）· **PS5 真机构建 ✅**（00b750d）
 
 ## 一、项目总体状态
 
@@ -195,10 +195,10 @@ cd "/c/Users/songl/Desktop/Web File Manager/ps5-web-file-manager"
 ### 当前矩阵（host `gcc 16.2.0` MinGW）
 
 ```
-ZIP 108 checks / RAR 27 checks / 7z 26 checks   全 0 失败
+ZIP 108 checks / RAR 27 checks / 7z 28 checks   全 0 失败
 ```
 
-未做：PS5 真机构建验证（WSL 重跑 `build-elf.sh`）。
+未做：PS5 真机端到端验证（但 ELF 已成功构建：`size 1017864 B, sha256 2eb04581…473a157, e_machine=0x003e`，commit `00b750d`）。
 
 ## 四·补充、限额体系完整参考（2026-09-08 代码实测）
 
@@ -244,11 +244,22 @@ ZIP 108 checks / RAR 27 checks / 7z 26 checks   全 0 失败
 | # | 任务 | 状态 | 说明 |
 |---|---|---|---|
 | ① | ZIP 分卷 | ✅ 完成 `da565cc` | 三种命名约定全支持，108 checks 全绿 |
-| ② | **7z 引擎** | 🔧 进行中 | 基建已落地 `8bee84b`：vendor LZMA SDK 26.03 解码子集 + 真实 fixture + e2e 驱动，当前 **7/10 夹具逐字节一致**。引擎本体（自解析 folder + 流式链驱动 + 7zAES）未写 |
-| ③ | 7z 分卷 | ⏳ | `.7z.001` 序列喂给 7z 解码器；复用已完成 `zipx_volstream` 的 CONCAT 模式 |
-| ④ | 六组合收口 | ⏳ | `extract.c` dispatch + `assets/main.js` 统一识别；RAR 分卷已通 |
-| ⑤ | 密码通道 | ⏳ | 加密 RAR（unrar `RARSetPassword`）+ 加密 7z（LZMA SDK `Aes`）共用一套「提示输入密码 → 重试」通道 |
-| ⑥ | 报错信息 | 贯穿 | 用户强调：错误要**详细准确**（含卷名、路径、errno、字节数），不出现 "No error" 这种误导文案 |
+| ② | **7z 引擎** | ✅ 完成 `2748b38` | 自解析 folder + 拉式 codec 链 + pull pipeline；10/10 夹具逐字节一致；本轮补 7zAES(`4da345a`) + facade UX(`112f8a6`) |
+| ③ | 7z 分卷 | ✅ 完成 `9b2f5a0` | SDK `ISeekInStream` 包装有序卷列表，vol.7z.001 fixture 通过 |
+| ④ | 六组合收口 | ✅ 完成 `200b386` | extract.c dispatch + main.js 识别 + 密码 UI；六种全部走通 |
+| ⑤ | 密码通道 | ✅ 完成 `4da345a` | 加密 RAR (`RARSetPassword`) + 加密 7z (`7zAES`)，前端共用 `extractPasswordAsk` 弹框 → 回写到 `task->extract_password` |
+| ⑥ | 报错信息 | ✅ 完成 `112f8a6` | i18n 两文件更新（unsupported 移除「仅 ZIP/RAR」+ 新增 `err_extract_password`）；7z facade 把 archive basename 写进密码错 detail；ESZ 引擎错误码全部映射到 `ZIPX_ERR_*` |
+| ⓩ | PS5 真机构建 | ✅ 完成 `00b750d` | prospero-clang++ 18.1.8 出 ELF 1017864 B / e_machine=0x003e |
+| — | 唯一已知缺口 | 🚧 `KNOWN_GAPS` | 7zAES 加密头（`-mhe=on`），需独立单元解密第二份头 + AES 解 pack 索引 |
+
+### 七组合细节（关键收货）
+
+- **`src/sevenz_extract.c`（1753 行）** 是 7z 在主流程中的 facade。模型完全仿 `zip_extract.c` / `rar_extract.c`：staging 目录 + 同步写 `extracts/<task>/<dest>` + `publish` 阶段整 rename → atomic 发布。冲突策略：FAIL / OVERWRITE / MERGE 三档，目录碰撞一律递归下钻（仅叶子文件不同 → 比 diff）
+- **CBC 报错链** `engine.dz.message` → `extract_set_error()` 拷贝到 `task->error` / `error_arg` → JSON 模板中的 `{arg}` 透传到 `assets/main.js` `backendErrorText()` → 用户看到的 toast 含**条目名 / errno / 字节数**。例如密码错：toast 显示「密码错误: aes.7z (folder 0 (7zAES): 7zAES decrypt failed)」
+- **冲突策略测试矩阵** 12 case 全部覆盖：
+  - 创建新目录 / 命中已存在文件 / OVERWRITE 替换 / MERGE 合并（含同名文件）+ 大小写差异 / dir-dir 递归
+- **限额内核** 与 ZIP / RAR 完全共用 `zipx_default_limits()` / `limits_profile()`（抽到 `src/zipx_common.c`）；前端阈值 480 GiB 切 large 档
+- **进度 callback 阈值**：scan 阶段 256 entries 报一次（之前 4096，小包不更新 UI），extract 阶段每次 `node_pull()` 后 `bytes_done += got`；带 throttle，让 PS5 上 200 MHz NFC tag 写入频率不至于炸
 
 ### 7z 引擎设计要点（2026-09-12 实测定案）
 
@@ -268,10 +279,56 @@ ZIP 108 checks / RAR 27 checks / 7z 26 checks   全 0 失败
 
 ### 其他遗留（非本次主线）
 
-- **WSL 重编 ELF**（`.build/build-elf.sh`）→ 装 PS5 → 真机复测：①160GB/9.5万文件大 zip 能解 ②分卷 RAR 进度条实时走 ③**新增 ZIP 分卷真机验证**
+- **WSL 重编 ELF**（`.build/build-elf.sh`）→ 装 PS5 → 真机复测：
+  1. 160GB/9.5万文件大 zip 能解
+  2. 分卷 RAR 进度条实时走
+  3. **新增** ZIP / RAR / 7z 三类分卷的真机验证
+  4. **新增** 加密 7z（7zAES）的真机验证
 - 通过后打 tag **v1.9.1** 并 push（用户自家终端）
+- 单独缺口（独立单元）：**`mhe=on` 加密头 7z** —— engine 接受前必须解密第二份 header 才能读 folder 表，工作量约为标准 7zAES 的 2 倍（独立读两遍 AES）。当前以 `KNOWN_GAPS` 在 `tests/run-sevenz-tests.sh` 标注，缺口修复后该脚本会主动报错
 - 可选性能项：fsync 批量化（每 64MB/N 条刷一次）——160GB/9.5万文件级别可省 20-30 分钟；解压失败保留 staging 支持续解（中等改动）
 - 可选 UX 修复：进度条% / 文字进度 / ETA 三处口径统一为字节（见第四节）
+
+### PS5 真机构建已闭环（2026-09-13 午，commit `00b750d`）
+
+首轮 `make all` 直接撞上 `prospero-clang 18` 编译 AesOpt.c 时**无声启用 AES-NI / AVX / VAES 路径**，但 **`__wmmintrin_aes.h`** 默认不开，导致 `_mm256_aesenc_epi128` 未声明 → 20 个错误 + `-ferror-limit=` 强退。
+
+修复路径上踩了反直觉坑：
+1. **直接排除 AesOpt.c** → 编过，**链接失败 5 个未定义符号**（`AesCbc_Encode_HW / AesCtr_Code_HW_256` 等）。`Aes.c` 始终引用这些名字（函数指针 + `AesGenTables` 注册），不能简单删
+2. **最终选择**：路径过滤 `CFLAGS_7Z = -maes -mavx2 -mvaes`，仅 `third_party/7z/*.c` 用这一组 flag；zlib / minizip-ng / 项目源码不传
+3. PS5 是 Zen 2，硬件全支持；运行时无任何变化
+
+```diff
++SEVENZ_C_FLAGS   := -maes -mavx2 -mvaes
++THIRD_PARTY_C_FLAGS_7Z := $(THIRD_PARTY_C_FLAGS) $(SEVENZ_C_FLAGS)
+ # 应用规则的 if 条件：仅当来源路径含 third_party/7z/ 时改用 _7Z
+```
+
+**产物**（`prospero-strip` 后）：
+```
+-rwxr-xr-x 1 song song 995K Sep 13 14:01 web-file-mgr.elf
+  size:    1017864 bytes
+  sha256:  2eb045812ad9b0b03c5374c63db2dcbe745e59b2255e3af750132125e473a157
+  e_machine=0x003e (x86-64 / PS5 ✓)
+```
+
+ELF 体积比 v1.9（919,440 B）多了 **~100 KiB**（7z codec 全套 + Aes/Sha256/Lzma2Dec 等解码器），符号 gc 后无多余。同步回 Windows 路径 `C:\Users\songl\Desktop\Web File Manager\ps5-web-file-manager\web-file-mgr.elf`。
+
+### 7z facade UX 修补（commit `112f8a6`）
+
+用户 2026-09-13 上午反馈「上次解压不了 / 进度不显示」，根因查实 + 锁定：
+
+| 项 | 根因 | 修复 |
+|---|---|---|
+| scan_entries 静默 | 4096 entries 才报，<4096 的包扫描期间 UI 没动 | 改为每 256 entries，扫描末 force-report |
+| precheck_folders 静默 | 此阶段根本没回 callback | 入口强制一次「validating folders」 |
+| 密码错 detail 空 | engine 返回 `ZIPX_ERR_PASSWORD` 时 detail 字段 NULL → i18n `{arg}` → 「密码错误: 」（光头）| `sevenz_ctx_t` 新增 `sevenz_path` 字段，密码错 detail 始终 = 入口文件名 |
+| i18n `err_extract_unsupported` | 还停留在「仅 ZIP/RAR」 | 提示文案加 7z |
+| 缺 `err_extract_password` 字段 | 7z 密码错无匹配 key | 新增（en + zh） |
+
+测试增量 6 项（`test_sevenz_extract.c --cases`）：bytes_done 单调非减 + ≥ 2 次 callback + 末端 ≥ 90% 总数；密码错 `r.detail` 含 `aes.7z`。
+
+最终矩阵：**ZIP 108 / RAR 27 / 7z 28 = 163 checks 全过**。
 
 ## 六、环境要点（新人必读）
 
