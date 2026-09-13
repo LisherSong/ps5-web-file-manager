@@ -31,6 +31,8 @@ typedef enum {
   ZIPX_ERR_LIMIT_DEPTH,
   ZIPX_ERR_LIMIT_NAME,
   ZIPX_ERR_CONFLICT,   /* target already exists for the chosen policy */
+  ZIPX_ERR_PASSWORD,   /* the archive is encrypted and the password is missing
+                          or wrong; the caller can prompt and retry */
   ZIPX_ERR_SPACE,
   ZIPX_ERR_IO,
   ZIPX_ERR_CRC,

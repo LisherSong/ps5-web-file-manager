@@ -67,6 +67,11 @@ COMPAT_INC="$ROOT/tests/compat"
   -include "$ROOT/tests/posix_compat.h" \
   -o "$BUILD/zip_extract.o" "$ROOT/src/zip_extract.c"
 
+# Format-independent helpers (limits profiles + status string) live here.
+"$CC" -c -O2 -Wall -Wextra -Wno-unused-parameter -I"$ROOT/src" \
+  -I"$COMPAT_INC" -include "$ROOT/tests/posix_compat.h" \
+  -o "$BUILD/zipx_common.o" "$ROOT/src/zipx_common.c"
+
 # Volume support: the concatenating stream and the volume set detector.
 "$CC" -c -O2 -Wall -Wextra -Wno-unused-parameter \
   -I"$ROOT/third_party/minizip-ng/include" -I"$ROOT/src" -I"$COMPAT_INC" \
@@ -94,14 +99,14 @@ objs=()
 rar_objs=()
 for obj in "$BUILD"/*.o; do
   case "$obj" in
-    */zip_extract.o|*/rar_extract.o|*/test_zip_extract.o|*/test_rar_extract.o) continue ;;
+    */zip_extract.o|*/zipx_common.o|*/rar_extract.o|*/test_zip_extract.o|*/test_rar_extract.o) continue ;;
     */unrar7_*.o) rar_objs+=("$obj"); continue ;;
   esac
   objs+=("$obj")
 done
 
 "$CC" -O2 -o "$BUILD/test-zip-extract" \
-  "$BUILD/zip_extract.o" "$BUILD/test_zip_extract.o" "${objs[@]}"
+  "$BUILD/zip_extract.o" "$BUILD/zipx_common.o" "$BUILD/test_zip_extract.o" "${objs[@]}"
 
 # The RAR test links the unrar7 objects, so it needs the C++ driver.
 # Windows unrar system.cpp references SetSuspendState (PowrProf).
@@ -109,7 +114,7 @@ RAR_LIBS=()
 [ "$HOST_KIND" = windows ] && RAR_LIBS=(-lpowrprof)
 "$CXX" -O2 -o "$BUILD/test-rar-extract" \
   "$BUILD/rar_extract.o" "$BUILD/test_rar_extract.o" \
-  "$BUILD/zip_extract.o" "${objs[@]}" "${rar_objs[@]}" "${RAR_LIBS[@]}"
+  "$BUILD/zip_extract.o" "$BUILD/zipx_common.o" "${objs[@]}" "${rar_objs[@]}" "${RAR_LIBS[@]}"
 
 "$BUILD/test-zip-extract" "$ROOT/tests/fixtures" "$BUILD/work-zip"
 # Real RAR fixtures (v6 / multi-volume / encrypted) live in fixtures-real/,
