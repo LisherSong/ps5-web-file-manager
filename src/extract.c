@@ -15,6 +15,7 @@
 #include "json_util.h"
 #include "path_util.h"
 #include "rar_extract.h"
+#include "sevenz_extract.h"
 #include "zip_extract.h"
 #include "zipx_volume.h"
 
@@ -184,10 +185,11 @@ extract_dispatch(file_task_t *task, zipx_conflict_t conflict,
                "(rename the parts to 'x.part1.rar', 'x.part2.rar', ...)");
       status = ZIPX_ERR_UNSUPPORTED;
     } else if(kind == 2) {
-      extract_set_detail(result, task->src);
-      snprintf(result->message, sizeof(result->message),
-               "7z archives are not supported yet (repack as .zip or .rar)");
-      status = ZIPX_ERR_UNSUPPORTED;
+      status = sevenz_extract(task->src, task->dst, conflict, limits,
+                              extract_cancel, extract_progress, task,
+                              task->extract_password[0] ? task->extract_password
+                                                        : NULL,
+                              result);
     } else {
       extract_set_detail(result, task->src);
       snprintf(result->message, sizeof(result->message),
@@ -206,9 +208,16 @@ extract_dispatch(file_task_t *task, zipx_conflict_t conflict,
     return rar_extract(task->src, task->dst, conflict, limits,
                        extract_cancel, extract_progress, task, result);
   }
+  if(ends_with_ci(task->src, ".7z")) {
+    return sevenz_extract(task->src, task->dst, conflict, limits,
+                          extract_cancel, extract_progress, task,
+                          task->extract_password[0] ? task->extract_password
+                                                    : NULL,
+                          result);
+  }
   extract_set_detail(result, task->src);
   snprintf(result->message, sizeof(result->message),
-           "unsupported archive format (only .zip and .rar are accepted)");
+           "unsupported archive format (only .zip, .rar and .7z are accepted)");
   return ZIPX_ERR_UNSUPPORTED;
 }
 
@@ -231,6 +240,7 @@ extract_error_code(zipx_status_t status) {
   case ZIPX_ERR_SPACE: return "no_space";
   case ZIPX_ERR_IO: return "extract_io";
   case ZIPX_ERR_CRC: return "extract_crc";
+  case ZIPX_ERR_PASSWORD: return "extract_password";
   default: return "extract_failed";
   }
 }
@@ -317,6 +327,7 @@ api_extract(struct MHD_Connection *conn, const char *body, size_t body_size) {
   char *conflict_str = body_form_value(body, body_size, "conflict");
   char *remove_str = body_form_value(body, body_size, "remove_source");
   char *large_str = body_form_value(body, body_size, "large");
+  char *password_str = body_form_value(body, body_size, "password");
   extract_conflict_t conflict = EXTRACT_CONFLICT_FAIL;
   int remove_source = remove_str && !strcmp(remove_str, "1");
   int large = large_str && !strcmp(large_str, "1");
@@ -325,7 +336,8 @@ api_extract(struct MHD_Connection *conn, const char *body, size_t body_size) {
   struct stat st;
 
   if(!path || !dst_dir || !path[0] || !dst_dir[0]) {
-    free(path); free(dst_dir); free(conflict_str); free(remove_str); free(large_str);
+    free(path); free(dst_dir); free(conflict_str); free(remove_str);
+    free(large_str); free(password_str);
     return send_json_error(conn, MHD_HTTP_BAD_REQUEST, "invalid path");
   }
   if(conflict_str) {
@@ -334,23 +346,27 @@ api_extract(struct MHD_Connection *conn, const char *body, size_t body_size) {
     } else if(!strcmp(conflict_str, "merge")) {
       conflict = EXTRACT_CONFLICT_MERGE;
     } else if(strcmp(conflict_str, "fail")) {
-      free(path); free(dst_dir); free(conflict_str); free(remove_str); free(large_str);
+      free(path); free(dst_dir); free(conflict_str); free(remove_str);
+      free(large_str); free(password_str);
       return send_json_error(conn, MHD_HTTP_BAD_REQUEST, "invalid conflict");
     }
   }
   if(stat(path, &st) || !S_ISREG(st.st_mode)) {
-    free(path); free(dst_dir); free(conflict_str); free(remove_str); free(large_str);
+    free(path); free(dst_dir); free(conflict_str); free(remove_str);
+    free(large_str); free(password_str);
     return send_json_error(conn, MHD_HTTP_BAD_REQUEST, "file not found");
   }
   if(stat(dst_dir, &st) || !S_ISDIR(st.st_mode)) {
-    free(path); free(dst_dir); free(conflict_str); free(remove_str); free(large_str);
+    free(path); free(dst_dir); free(conflict_str); free(remove_str);
+    free(large_str); free(password_str);
     return send_json_error(conn, MHD_HTTP_BAD_REQUEST,
                            "destination must be a directory");
   }
 
   task = calloc(1, sizeof(*task));
   if(!task) {
-    free(path); free(dst_dir); free(conflict_str); free(remove_str); free(large_str);
+    free(path); free(dst_dir); free(conflict_str); free(remove_str);
+    free(large_str); free(password_str);
     return send_json_error(conn, MHD_HTTP_INTERNAL_SERVER_ERROR,
                            "out of memory");
   }
@@ -360,6 +376,14 @@ api_extract(struct MHD_Connection *conn, const char *body, size_t body_size) {
   task->extract_conflict = (int)conflict;
   task->extract_remove_source = remove_source;
   task->extract_large = large;
+  /* The size cap (256 bytes, including the NUL) leaves room for a 255-codepoint
+     UTF-8 password without overflowing the field or letting a malicious header
+     run away with it.  Anything longer is truncated, which is what a sane user
+     will never hit but matches the storage size of the field. */
+  if(password_str) {
+    snprintf(task->extract_password, sizeof(task->extract_password), "%s",
+             password_str);
+  }
   snprintf(task->src, sizeof(task->src), "%s", path);
   snprintf(task->dst, sizeof(task->dst), "%s", dst_dir);
   task->created_at = time(NULL);
@@ -370,7 +394,8 @@ api_extract(struct MHD_Connection *conn, const char *body, size_t body_size) {
   if(has_active_task_locked()) {
     pthread_mutex_unlock(&g_tasks_lock);
     free_task(task);
-    free(path); free(dst_dir); free(conflict_str); free(remove_str); free(large_str);
+    free(path); free(dst_dir); free(conflict_str); free(remove_str);
+    free(large_str); free(password_str);
     return send_json_error(conn, MHD_HTTP_CONFLICT, "another task is running");
   }
   task->id = g_next_task_id++;
@@ -384,7 +409,8 @@ api_extract(struct MHD_Connection *conn, const char *body, size_t body_size) {
     pthread_detach(task->thread);
   }
 
-  free(path); free(dst_dir); free(conflict_str); free(remove_str); free(large_str);
+  free(path); free(dst_dir); free(conflict_str); free(remove_str);
+  free(large_str); free(password_str);
   strbuf_printf(&b, "{\"ok\":true,\"task_id\":%lu}", task->id);
   return send_buffer(conn, MHD_HTTP_OK, b.data, "application/json");
 }

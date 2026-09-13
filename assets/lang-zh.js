@@ -101,6 +101,7 @@ window.WFM_LANG = {
   extracting: "解压",
   extractConfirm: "解压 {name} 到 {path}？",
   extractOverwriteAsk: "若目标已存在同名文件或目录：\n\n确定 = 覆盖同名文件（目录仍会合并）\n取消 = 若目标已存在则失败",
+  extractPasswordAsk: "此压缩包可能加密了（如 7zAES）。\n\n输入密码后解压，留空则尝试无密码解压。",
   extractUploadConfirm: "上传并解压 {name}？\n\n目标目录：{path}\n成功后将删除上传的压缩包。",
   extractStarted: "已开始解压 {name}",
   extractDone: "解压完成：{name}",

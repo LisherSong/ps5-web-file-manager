@@ -59,6 +59,11 @@ typedef struct file_task {
   int extract_conflict;
   int extract_remove_source;
   int extract_large;
+  /* UTF-8 password for archives that encrypt their streams (7zAES, RAR5 AES).
+     Empty means "try without one"; the engine returns ZIPX_ERR_PASSWORD for
+     an archive that needs one, and the web UI prompts and retries.  The
+     length is bounded so a runaway header field cannot overflow task memory. */
+  char extract_password[256];
   unsigned long long speed_sample_done;
   struct timespec speed_sample_time;
   task_eta_sample_t eta_samples[ETA_SAMPLE_SLOTS];

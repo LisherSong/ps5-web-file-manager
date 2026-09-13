@@ -784,11 +784,25 @@ function isZipSplitVolume(item) {
   return false;
 }
 
+function isSevenZipArchive(item) {
+  return item.type === "-" && /\.7z$/i.test(item.name);
+}
+
+function isSevenZipSplitVolume(item) {
+  if (item.type !== "-") return false;
+  // Byte-split 7z sets: name.7z.001 / .002 / ... — any volume is enough,
+  // the engine walks the directory to assemble the rest.
+  if (/\.7z\.0*\d+$/i.test(item.name)) return true;
+  return false;
+}
+
 function isExtractableArchive(item) {
   if (item.type !== "-") return false;
   if (/\.zip$/i.test(item.name)) return true;
   if (isZipSplitVolume(item)) return true;
   if (isRarMainVolume(item)) return true;
+  if (isSevenZipArchive(item)) return true;
+  if (isSevenZipSplitVolume(item)) return true;
   return false;
 }
 
@@ -835,18 +849,20 @@ function actionInstallSelectedPkgs() {
   return queuePkgInstall(selectedEntries().filter(isPkgPackage));
 }
 
-async function startExtractTask(path, dstDir, conflict, removeSource, name, large) {
+async function startExtractTask(path, dstDir, conflict, removeSource, name, large, password) {
   try {
     taskRefreshPath = cwd;
     setBusy(true);
     setStatus(t("extractStarted", { name }));
-    const data = await apiForm("/api/extract", {
+    const form = {
       path,
       dst_dir: dstDir,
       conflict,
       remove_source: removeSource ? "1" : "0",
       large: large ? "1" : "0"
-    });
+    };
+    if (password) form.password = password;
+    const data = await apiForm("/api/extract", form);
     trackTask(data.task_id, "extract", false);
     clearSelection(false);
     await pollTasks();
@@ -880,7 +896,16 @@ function actionExtract() {
   if (!confirm(t("extractConfirm", { name: displayName(item), path: displayPath(cwd) }))) return;
   const conflict = confirm(t("extractOverwriteAsk")) ? "overwrite" : "fail";
   const large = shouldPromptLargeMode(item.size) ? promptLargeMode(item.size) : false;
-  startExtractTask(item.path, cwd, conflict, false, displayName(item), large);
+  // 7z archives can be encrypted (7zAES); ask up front so an unprotected
+  // archive doesn't pay a wasted scan + folder parse.  An empty submission is
+  // fine — the engine returns ZIPX_ERR_PASSWORD and the user retries.
+  let password = "";
+  if (isSevenZipArchive(item) || isSevenZipSplitVolume(item)) {
+    const asked = prompt(t("extractPasswordAsk"), "");
+    if (asked === null) return;
+    password = asked;
+  }
+  startExtractTask(item.path, cwd, conflict, false, displayName(item), large, password);
 }
 
 function openImagePreview(item) {
