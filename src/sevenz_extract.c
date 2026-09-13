@@ -76,6 +76,7 @@ typedef struct {
   void *userdata;
   zipx_result_t *result;
   const char *password;
+  const char *sevenz_path;  /* original archive path, surfaced in errors */
   uint64_t entries_total;
   uint64_t entries_done;
   uint64_t bytes_total;
@@ -858,7 +859,9 @@ scan_entries(const CSzArEx *db, szx_ctx_t *c) {
                      (unsigned long long)c->limits.max_entries);
       break;
     }
-    if(c->entries_total % 4096 == 0) {
+    /* Once per ~256 entries is plenty for a header walk that only needs to
+       keep the spinner alive; szx_report() also rate-limits at 200 ms. */
+    if(c->entries_total % 256 == 0) {
       if(szx_canceled(c)) {
         ret = szx_fail(c, ZIPX_ERR_CANCELED, name, NULL);
         break;
@@ -866,6 +869,11 @@ scan_entries(const CSzArEx *db, szx_ctx_t *c) {
       szx_report(c, ZIPX_PHASE_SCAN, name, 0);
     }
   }
+
+  /* For archives below the per-N-entry report threshold the scan never fires a
+     throttled callback; push the final totals out so the UI sees total/entries
+     populated before extraction begins. */
+  szx_report(c, ZIPX_PHASE_SCAN, NULL, 1);
 
   szx_nameset_free(&set);
   return ret;
@@ -904,6 +912,10 @@ static int
 precheck_folders(const CSzArEx *db, szx_ctx_t *c) {
   UInt32 folder;
 
+  /* The decode stack for every folder has to round-trip here before the first
+     byte is written, so a multi-thousand-folder archive does not look stalled
+     between the entry scan ending and extraction starting. */
+  szx_report(c, ZIPX_PHASE_SCAN, "validating folders", 1);
   for(folder = 0; folder < db->db.NumFolders; folder++) {
     uint64_t pack_positions[SZ_CHAIN_MAX_STREAMS + 1];
     UInt32 pack_count = 0;
@@ -1197,9 +1209,11 @@ szx_sink_write(void *ctx, const void *data, size_t size) {
 static int
 szx_decode_error(szx_ctx_t *c, UInt32 folder, const sz_chain_err_t *derr,
                  const char *desc, int encrypted) {
+  const char *detail = encrypted ? c->sevenz_path : NULL;
+
   switch(derr->status) {
   case SZ_CHAIN_ERR_PASSWORD:
-    return szx_fail(c, ZIPX_ERR_PASSWORD, NULL, "folder %u (%s): %s",
+    return szx_fail(c, ZIPX_ERR_PASSWORD, detail, "folder %u (%s): %s",
                     (unsigned)folder, desc, derr->message);
   case SZ_CHAIN_ERR_METHOD:
   case SZ_CHAIN_ERR_LAYOUT:
@@ -1216,7 +1230,7 @@ szx_decode_error(szx_ctx_t *c, UInt32 folder, const sz_chain_err_t *derr,
                     (unsigned)folder, desc, derr->message);
   case SZ_CHAIN_ERR_DATA:
     if(encrypted) {
-      return szx_fail(c, ZIPX_ERR_PASSWORD, NULL,
+      return szx_fail(c, ZIPX_ERR_PASSWORD, detail,
                       "folder %u (%s): %s (the password is wrong, or the "
                       "archive is damaged)",
                       (unsigned)folder, desc, derr->message);
@@ -1585,6 +1599,7 @@ sevenz_extract(const char *sevenz_path, const char *dst_dir,
   c->progress = progress;
   c->userdata = userdata;
   c->password = password;
+  c->sevenz_path = sevenz_path;
 
   snprintf(dst_copy, sizeof(dst_copy), "%s", dst_dir);
   {

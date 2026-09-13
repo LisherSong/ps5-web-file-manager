@@ -116,6 +116,41 @@ policy_case(const char *label, const char *archive, const char *dst,
   check(st == want, buf);
 }
 
+/* The progress callback the dispatch driver installs fires the UI loop; it has
+   to be called multiple times, with monotonic bytes_done and a non-zero
+   bytes_total, or the front-end ends up with no spinner.  These checks pin
+   that down so a refactor that drops the callback returns the test set to
+   red instead of "no progress shown" on the device. */
+typedef struct {
+  int calls;
+  unsigned long long prev_done;
+  unsigned long long max_bytes_total;
+  unsigned long long max_bytes_done;
+  unsigned long long max_entries_total;
+  unsigned long long max_entries_done;
+} progress_recorder_t;
+
+static void
+recorder_progress(void *userdata, const zipx_progress_t *p) {
+  progress_recorder_t *r = userdata;
+
+  r->calls++;
+  if(p->bytes_total > r->max_bytes_total) r->max_bytes_total = p->bytes_total;
+  if(p->bytes_done > r->max_bytes_done) r->max_bytes_done = p->bytes_done;
+  if((unsigned long long)p->entries_total > r->max_entries_total) {
+    r->max_entries_total = (unsigned long long)p->entries_total;
+  }
+  if((unsigned long long)p->entries_done > r->max_entries_done) {
+    r->max_entries_done = (unsigned long long)p->entries_done;
+  }
+  if(p->bytes_done < r->prev_done) {
+    printf("  FAIL progress: bytes_done went backwards (%llu -> %llu)\n",
+           r->prev_done, p->bytes_done);
+    g_failures++;
+  }
+  r->prev_done = p->bytes_done;
+}
+
 static int
 run_cases(const char *fx, const char *work) {
   char arc[PATH_MAX_LOCAL];
@@ -136,6 +171,16 @@ run_cases(const char *fx, const char *work) {
   expect_fail("aes with the wrong password", arc, dst, "NotThePassword",
               ZIPX_CONFLICT_FAIL, zipx_default_limits(), NULL,
               ZIPX_ERR_PASSWORD, "7zAES");
+  {
+    char b2[256];
+    zipx_result_t r;
+    (void)sevenz_extract(arc, dst, ZIPX_CONFLICT_FAIL,
+                         zipx_default_limits(), NULL, NULL, NULL,
+                         "NotThePassword", &r);
+    snprintf(b2, sizeof(b2),
+             "wrong password: detail names the archive (got '%s')", r.detail);
+    check(strstr(r.detail, "aes.7z") != NULL, b2);
+  }
   check(!has_staging_leftover(work), "no staging tree survives a wrong password");
 
   snprintf(dst, sizeof(dst), "%s/pw-ok", work);
@@ -194,6 +239,26 @@ run_cases(const char *fx, const char *work) {
   expect_fail("an archive over the entry limit", arc, dst, NULL,
               ZIPX_CONFLICT_FAIL, &tight, NULL, ZIPX_ERR_LIMIT_ENTRIES,
               "more than 1 entries");
+
+  /* --- progress callback ---------------------------------------------- */
+  {
+    progress_recorder_t rec = {0};
+    zipx_result_t r;
+
+    snprintf(dst, sizeof(dst), "%s/progress", work);
+    mkdir(dst, 0777);
+    (void)sevenz_extract(arc, dst, ZIPX_CONFLICT_FAIL,
+                          zipx_default_limits(), NULL, recorder_progress,
+                          &rec, NULL, &r);
+    check(rec.calls >= 2, "progress callback fires multiple times");
+    check(rec.max_bytes_total > 0, "progress reports a non-zero bytes_total");
+    check(rec.max_bytes_done > 0,
+          "progress reports a non-zero bytes_done during extraction");
+    check(rec.max_entries_total >= 1,
+          "progress reports a non-zero entries_total");
+    check(rec.max_bytes_done >= rec.max_bytes_total * 9 / 10,
+          "progress reaches within 90% of the declared total");
+  }
 
   printf("  cases: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
