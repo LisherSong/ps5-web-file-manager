@@ -71,9 +71,17 @@ UNRAR7_SRCS := \
   third_party/unrar7/unpack.cpp third_party/unrar7/volume.cpp
 
 THIRD_PARTY_C_SRCS   := $(wildcard third_party/zlib/src/*.c) $(wildcard third_party/minizip-ng/src/*.c) $(wildcard third_party/7z/*.c)
+# AesOpt.c hard-codes x86 AES-NI / AVX / VAES intrinsics and guards them with
+# a compiler-version check that lets clang 18 in unconditionally. The plain
+# intrinsics (`_mm256_aesenc_epi128`) live behind <wmmintrin_aes.h>, which
+# clang only declares after `+mvaes +mavx2` (or higher). PS5 is Zen 2 and has
+# every one of these, so we just enable them for the 7z TU family instead of
+# dropping AesOpt.c (Aes.c references those HW symbol names via AesGenTables).
+SEVENZ_C_FLAGS        := -maes -mavx2 -mvaes
 THIRD_PARTY_C_FLAGS  := -O2 -w -Ithird_party/zlib/include -Ithird_party/minizip-ng/include -Ithird_party/7z \
   -DHAVE_ZLIB -DZLIB_COMPAT -DHAVE_UNISTD_H=1 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE \
   -DHAVE_FSEEKO -DZ7_PPMD_SUPPORT
+THIRD_PARTY_C_FLAGS_7Z := $(THIRD_PARTY_C_FLAGS) $(SEVENZ_C_FLAGS)
 UNRAR7_CXX_FLAGS     := -O2 -w -std=c++17 -DRARDLL -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
 # prospero-clang++ defaults to -stdlib=libc++; state it explicitly for clarity.
 UNRAR7_CXX_FLAGS_PS5 := $(UNRAR7_CXX_FLAGS) -stdlib=libc++
@@ -117,11 +125,11 @@ gen/%.c: assets/% gen-asset-module.py | gen
 
 ps5-obj/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(THIRD_PARTY_C_FLAGS) -c -o $@ $<
+	$(CC) $(if $(findstring third_party/7z,$<),$(THIRD_PARTY_C_FLAGS_7Z),$(THIRD_PARTY_C_FLAGS)) -c -o $@ $<
 
 linux-obj/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(THIRD_PARTY_C_FLAGS) -c -o $@ $<
+	$(HOST_CC) $(if $(findstring third_party/7z,$<),$(THIRD_PARTY_C_FLAGS_7Z),$(THIRD_PARTY_C_FLAGS)) -c -o $@ $<
 
 ps5-obj/%.o: %.cpp
 	@mkdir -p $(dir $@)
