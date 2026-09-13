@@ -41,6 +41,8 @@
 #include "Delta.h"
 #include "Bra.h"
 #include "Bcj2.h"
+#include "Aes.h"
+#include "Sha256.h"
 
 /* ------------------------------------------------------------------ ids */
 
@@ -49,6 +51,7 @@
 #define SZ_M_LZMA2 0x21u
 #define SZ_M_LZMA 0x030101u
 #define SZ_M_PPMD 0x030401u
+#define SZ_M_AES 0x06F10701u
 #define SZ_M_BCJ 0x03030103u
 #define SZ_M_PPC 0x03030205u
 #define SZ_M_IA64 0x03030401u
@@ -64,7 +67,8 @@ enum {
   SZ_N_LZMA2,
   SZ_N_PPMD,
   SZ_N_FILTER,
-  SZ_N_BCJ2
+  SZ_N_BCJ2,
+  SZ_N_AES
 };
 
 enum {
@@ -121,6 +125,7 @@ const char *sz_chain_status_string(sz_chain_status_t status) {
   case SZ_CHAIN_ERR_METHOD: return "unsupported compression method";
   case SZ_CHAIN_ERR_LAYOUT: return "unsupported coder chain";
   case SZ_CHAIN_ERR_LIMIT: return "resource limit exceeded";
+  case SZ_CHAIN_ERR_PASSWORD: return "password required or wrong";
   case SZ_CHAIN_ERR_READ: return "read failed";
   case SZ_CHAIN_ERR_WRITE: return "write failed";
   case SZ_CHAIN_ERR_DATA: return "corrupt compressed data";
@@ -144,7 +149,7 @@ const char *sz_chain_method_name(uint32_t method) {
   case SZ_M_ARMT: return "ARMT";
   case SZ_M_SPARC: return "SPARC";
   case SZ_M_BCJ2: return "BCJ2";
-  case 0x06F10701u: return "7zAES";
+  case SZ_M_AES: return "7zAES";
   default: return NULL;
   }
 }
@@ -157,18 +162,154 @@ static const char *method_label(uint32_t method, char *scratch,
   return scratch;
 }
 
+/* ---------------------------------------------------------------- 7zAES */
+
+/* The SDK documents the AES entry points as wanting 16-byte aligned pointers
+   (its SSE path loads the round keys and the data with aligned moves), so the
+   per-node AES state is declared with that alignment. */
+#if defined(__GNUC__) || defined(__clang__)
+#define SZ_AES_ALIGN __attribute__((aligned(16)))
+#else
+#define SZ_AES_ALIGN
+#endif
+
+/* 7-Zip always uses AES-256 for 7zAES (CAesCbcDecoder(kKeySize)). */
+#define SZ_AES_KEY_SIZE 32
+/* numCyclesPower 0x3F means "no key derivation": the key is salt + password. */
+#define SZ_AES_CYCLES_NO_KDF 0x3F
+/* Longer than anything a person types; the password is converted to UTF-16LE
+   before it is hashed, so this bounds that buffer too. */
+#define SZ_AES_MAX_PASSWORD 4096
+
+/* Splits the 7zAES property bytes into the three values they carry.  Mirrors
+   CDecoder::SetDecoderProperties2() in 7-Zip:
+
+   data[0]  bit 0..5   numCyclesPower
+            bit 7       a salt is present   (16 + high nibble of data[1] bytes)
+            bit 6       an IV is present    (16 + low  nibble of data[1] bytes)
+   data[1]  high nibble extends saltSize, low nibble extends ivSize
+   data[2]  salt, then IV, each only as long as its flag says
+
+   Returns 0 on success and -1 when the bytes contradict the lengths they
+   declare.  A 0 byte property block is legal: it means the two defaults. */
+static int aes_props_layout(const uint8_t *p, uint32_t size, uint32_t *cycles,
+                            uint32_t *salt_size, uint32_t *iv_size) {
+  uint32_t b0, b1;
+
+  *cycles = 0;
+  *salt_size = 0;
+  *iv_size = 0;
+  if(size == 0) return 0;
+  b0 = p[0];
+  *cycles = b0 & 0x3Fu;
+  if((b0 & 0xC0u) == 0) return size == 1 ? 0 : -1;
+  if(size <= 1) return -1;
+  b1 = p[1];
+  *salt_size = ((b0 >> 7) & 1u) + (b1 >> 4);
+  *iv_size = ((b0 >> 6) & 1u) + (b1 & 0x0Fu);
+  return (2 + *salt_size + *iv_size == size) ? 0 : -1;
+}
+
+static void aes_put16(uint8_t *dst, size_t *pos, uint32_t unit) {
+  dst[(*pos)++] = (uint8_t)(unit & 0xFFu);
+  dst[(*pos)++] = (uint8_t)((unit >> 8) & 0xFFu);
+}
+
+/* UTF-8 to UTF-16LE, the encoding 7-Zip hashes the password in.  Returns the
+   number of bytes written, or 0 when src is not valid UTF-8 or does not fit.
+   An embedded NUL ends the password, as it does in 7-Zip. */
+static size_t utf8_to_utf16le(const char *src, uint8_t *dst,
+                              size_t dst_size) {
+  const uint8_t *p = (const uint8_t *)src;
+  size_t out = 0;
+
+  while(*p) {
+    uint32_t cp;
+    unsigned extra, i;
+
+    if(*p < 0x80) {
+      cp = *p++;
+      extra = 0;
+    } else if((*p & 0xE0) == 0xC0) {
+      cp = (*p++) & 0x1Fu;
+      extra = 1;
+    } else if((*p & 0xF0) == 0xE0) {
+      cp = (*p++) & 0x0Fu;
+      extra = 2;
+    } else if((*p & 0xF8) == 0xF0) {
+      cp = (*p++) & 0x07u;
+      extra = 3;
+    } else {
+      return 0;
+    }
+    for(i = 0; i < extra; i++) {
+      if((*p & 0xC0) != 0x80) return 0;
+      cp = (cp << 6) | (uint32_t)((*p++) & 0x3Fu);
+    }
+    if(cp > 0x10FFFFu || (cp >= 0xD800u && cp <= 0xDFFFu)) return 0;
+    if(cp >= 0x10000u) {
+      uint32_t v = cp - 0x10000u;
+      if(out + 4 > dst_size) return 0;
+      aes_put16(dst, &out, 0xD800u | (v >> 10));
+      aes_put16(dst, &out, 0xDC00u | (v & 0x3FFu));
+    } else {
+      if(out + 2 > dst_size) return 0;
+      aes_put16(dst, &out, cp);
+    }
+  }
+  return out;
+}
+
+/* CKeyInfo::CalcKey(): one running SHA-256 over (salt || password || counter)
+   repeated 1 << cycles times, where counter is a little endian 64-bit index. */
+static void aes_derive_key(const uint8_t *salt, uint32_t salt_size,
+                           const uint8_t *pwd, size_t pwd_size,
+                           uint32_t cycles, uint8_t key[SZ_AES_KEY_SIZE]) {
+  CSha256 sha;
+  uint32_t rounds, i;
+  uint8_t tail[8];
+
+  if(cycles == SZ_AES_CYCLES_NO_KDF) {
+    size_t pos = 0, k;
+    for(i = 0; i < salt_size && pos < SZ_AES_KEY_SIZE; i++) key[pos++] = salt[i];
+    for(k = 0; k < pwd_size && pos < SZ_AES_KEY_SIZE; k++) key[pos++] = pwd[k];
+    for(; pos < SZ_AES_KEY_SIZE; pos++) key[pos] = 0;
+    return;
+  }
+
+  Sha256_Init(&sha);
+  rounds = (uint32_t)1 << cycles;
+  for(i = 0; i < rounds; i++) {
+    if(salt_size) Sha256_Update(&sha, salt, (size_t)salt_size);
+    if(pwd_size) Sha256_Update(&sha, pwd, pwd_size);
+    tail[0] = (uint8_t)i;
+    tail[1] = (uint8_t)(i >> 8);
+    tail[2] = (uint8_t)(i >> 16);
+    tail[3] = (uint8_t)(i >> 24);
+    tail[4] = 0;
+    tail[5] = 0;
+    tail[6] = 0;
+    tail[7] = 0;
+    Sha256_Update(&sha, tail, sizeof(tail));
+  }
+  Sha256_Final(&sha, key);
+}
+
 /* -------------------------------------------------------------- limits */
 
 static const sz_chain_limits_t g_limits_default = {
   (uint64_t)512 << 20,  /* LZMA / LZMA2 dictionary */
   (uint64_t)256 << 20,  /* PPMd model */
-  (uint64_t)256 << 20   /* BCJ2 side streams */
+  (uint64_t)256 << 20,  /* BCJ2 side streams */
+  24                    /* 7zAES: 2^24 SHA-256 passes is already ~8 s of work,
+                           and numCyclesPower comes from the archive */
 };
 
 static const sz_chain_limits_t g_limits_large = {
   (uint64_t)1536 << 20,
   (uint64_t)1024 << 20,
-  (uint64_t)1024 << 20
+  (uint64_t)1024 << 20,
+  24
 };
 
 const sz_chain_limits_t *sz_chain_limits_profile(int profile) {
@@ -280,6 +421,7 @@ static int method_kind(uint32_t method) {
   case SZ_M_LZMA2: return SZ_N_LZMA2;
   case SZ_M_PPMD: return SZ_N_PPMD;
   case SZ_M_BCJ2: return SZ_N_BCJ2;
+  case SZ_M_AES: return SZ_N_AES;
   case SZ_M_DELTA:
   case SZ_M_BCJ:
   case SZ_M_PPC:
@@ -597,6 +739,14 @@ uint32_t sz_chain_num_pack_streams(const sz_chain *c) {
   return c ? c->num_pack_streams : 0;
 }
 
+int sz_chain_needs_password(const sz_chain *c) {
+  uint32_t i;
+  if(!c) return 0;
+  for(i = 0; i < c->num_coders; i++)
+    if(c->coder[i].method == SZ_M_AES) return 1;
+  return 0;
+}
+
 int64_t sz_chain_coder_method(const sz_chain *c, uint32_t index) {
   if(!c || index >= c->num_coders) return -1;
   return (int64_t)c->coder[index].method;
@@ -648,6 +798,22 @@ int sz_chain_check(const sz_chain *c, sz_chain_err_t *err) {
         err_set(err, SZ_CHAIN_ERR_LAYOUT, (int32_t)i, cd->method, 0,
                 "BCJ2 coder %u has %u input streams, expected 4", (unsigned)i,
                 (unsigned)cd->num_in_streams);
+        return -1;
+      }
+    } else if(kind == SZ_N_AES) {
+      uint32_t cycles, salt_size, iv_size;
+      if(cd->num_in_streams != 1) {
+        err_set(err, SZ_CHAIN_ERR_LAYOUT, (int32_t)i, cd->method, 0,
+                "7zAES coder %u has %u input streams, expected 1", (unsigned)i,
+                (unsigned)cd->num_in_streams);
+        return -1;
+      }
+      if(aes_props_layout(c->blob + cd->props_off, cd->props_size, &cycles,
+                          &salt_size, &iv_size) != 0) {
+        err_set(err, SZ_CHAIN_ERR_HEADER, (int32_t)i, cd->method, 0,
+                "7zAES coder %u carries %u property bytes, which do not match "
+                "the salt and IV lengths they declare",
+                (unsigned)i, (unsigned)cd->props_size);
         return -1;
       }
     } else if(cd->num_in_streams != 1) {
@@ -745,6 +911,16 @@ struct sz_node {
       size_t mlen, moff;
       int prepared;
     } b2;
+    struct {
+      /* iv | keyMode | AES-256 round keys, then the ciphertext block being
+         decrypted and the plaintext block it just produced.  AES_NUM_IVMRK_WORDS
+         is a multiple of four words, so block/pbuf inherit the 16-byte
+         alignment the AES entry points want. */
+      UInt32 ivAes[AES_NUM_IVMRK_WORDS];
+      uint8_t block[AES_BLOCK_SIZE];
+      uint8_t pbuf[AES_BLOCK_SIZE];
+      size_t plen, poff;
+    } SZ_AES_ALIGN aes;
   } u;
 };
 
@@ -756,6 +932,8 @@ typedef struct {
   sz_chain_read_fn read_at;
   void *read_ctx;
   sz_chain_err_t *err;
+  const char *password;
+  int has_aes; /* a 7zAES coder was built: a failure may be a wrong password */
   int failed;
   sz_chain_status_t fail_status;
   int32_t fail_coder;
@@ -1095,6 +1273,50 @@ static int node_pull(sz_node *n, uint8_t *dst, size_t want, size_t *got) {
     }
     break;
 
+  case SZ_N_AES: {
+    /* 7-Zip encrypts the packed stream with AES-256-CBC and rounds its length
+       up to a whole number of blocks, so the ciphertext is always block
+       aligned; the coder's declared output size is the true (unrounded)
+       length, and the tail of the final block is simply never delivered. */
+    while(total < want) {
+      size_t avail;
+
+      if(n->u.aes.poff < n->u.aes.plen) {
+        avail = n->u.aes.plen - n->u.aes.poff;
+        if(avail > want - total) avail = want - total;
+        memcpy(dst + total, n->u.aes.pbuf + n->u.aes.poff, avail);
+        n->u.aes.poff += avail;
+        total += avail;
+        continue;
+      }
+      if(n->in_off > 0) {
+        size_t rest = n->in_len - n->in_off;
+        if(rest) memmove(n->inbuf, n->inbuf + n->in_off, rest);
+        n->in_len = rest;
+        n->in_off = 0;
+      }
+      if(n->in_len < AES_BLOCK_SIZE) {
+        size_t g = 0;
+        if(n->in_eof)
+          return node_fail(n, SZ_CHAIN_ERR_DATA,
+                           "the encrypted 7zAES stream ends in a partial block");
+        if(node_pull(n->in, n->inbuf + n->in_len, n->in_cap - n->in_len,
+                     &g) != 0)
+          return -1;
+        if(g == 0) n->in_eof = 1;
+        else n->in_len += g;
+        continue;
+      }
+      memcpy(n->u.aes.block, n->inbuf, AES_BLOCK_SIZE);
+      n->in_off = AES_BLOCK_SIZE;
+      g_AesCbc_Decode(n->u.aes.ivAes, n->u.aes.block, 1);
+      memcpy(n->u.aes.pbuf, n->u.aes.block, AES_BLOCK_SIZE);
+      n->u.aes.plen = AES_BLOCK_SIZE;
+      n->u.aes.poff = 0;
+    }
+    break;
+  }
+
   case SZ_N_BCJ2: {
     CBcj2Dec *p = &n->u.b2.st;
     size_t want0 = want;
@@ -1284,6 +1506,7 @@ static sz_node *build_coder(sz_build *b, uint32_t index) {
   case SZ_N_LZMA2:
   case SZ_N_PPMD:
   case SZ_N_FILTER:
+  case SZ_N_AES:
     n->in = build_stream(b, cd->first_in_stream);
     if(!n->in) {
       node_destroy(n);
@@ -1438,6 +1661,70 @@ static sz_node *build_coder(sz_build *b, uint32_t index) {
     if(alloc_inbuf(n, SZ_FILT_CHUNK + SZ_FILT_LOOKAHEAD) != 0) goto oom;
     break;
   }
+  case SZ_N_AES: {
+    uint32_t cycles = 0, salt_size = 0, iv_size = 0;
+    const uint8_t *salt, *iv_bytes;
+    const char *pwd = b->password;
+    size_t pwd_len, pwd16_size;
+    uint8_t *pwd16;
+    uint8_t key[SZ_AES_KEY_SIZE];
+    uint8_t iv[AES_BLOCK_SIZE];
+
+    b->has_aes = 1;
+    if(aes_props_layout(n->props, n->props_size, &cycles, &salt_size,
+                        &iv_size) != 0) {
+      build_fail(b, SZ_CHAIN_ERR_HEADER, (int32_t)index, cd->method,
+                 "7zAES coder %u carries %u malformed property bytes",
+                 (unsigned)index, (unsigned)n->props_size);
+      goto fail;
+    }
+    if(cycles != SZ_AES_CYCLES_NO_KDF && cycles > c->limits.max_aes_cycles) {
+      build_fail(b, SZ_CHAIN_ERR_LIMIT, (int32_t)index, cd->method,
+                 "7zAES key derivation asks for %llu SHA-256 passes, the limit "
+                 "is %llu",
+                 (unsigned long long)((uint64_t)1 << cycles),
+                 (unsigned long long)((uint64_t)1 << c->limits.max_aes_cycles));
+      goto fail;
+    }
+    if(!pwd || !*pwd) {
+      build_fail(b, SZ_CHAIN_ERR_PASSWORD, (int32_t)index, cd->method,
+                 "the archive is encrypted with 7zAES; a password is required");
+      goto fail;
+    }
+    pwd_len = strlen(pwd);
+    if(pwd_len > SZ_AES_MAX_PASSWORD) {
+      build_fail(b, SZ_CHAIN_ERR_PASSWORD, (int32_t)index, cd->method,
+                 "the password is %llu bytes long, at most %u are supported",
+                 (unsigned long long)pwd_len, (unsigned)SZ_AES_MAX_PASSWORD);
+      goto fail;
+    }
+    /* Every UTF-8 byte yields at most one UTF-16 code unit, so twice the byte
+       count always fits the converted password. */
+    pwd16 = (uint8_t *)malloc(2 * (pwd_len + 1));
+    if(!pwd16) goto oom;
+    pwd16_size = utf8_to_utf16le(pwd, pwd16, 2 * (pwd_len + 1));
+    if(pwd16_size == 0) {
+      free(pwd16);
+      build_fail(b, SZ_CHAIN_ERR_PASSWORD, (int32_t)index, cd->method,
+                 "the password is not valid UTF-8");
+      goto fail;
+    }
+
+    salt = n->props + 2;
+    iv_bytes = salt + salt_size;
+    aes_derive_key(salt, salt_size, pwd16, pwd16_size, cycles, key);
+    free(pwd16);
+
+    /* 7-Zip zeroes the full 16 byte IV before copying ivSize bytes into it, so
+       a short IV is zero padded rather than repeated. */
+    memset(iv, 0, sizeof(iv));
+    if(iv_size) memcpy(iv, iv_bytes, iv_size);
+    Aes_SetKey_Dec(n->u.aes.ivAes + 4, key, SZ_AES_KEY_SIZE);
+    AesCbc_Init(n->u.aes.ivAes, iv);
+    memset(key, 0, sizeof(key));
+    if(alloc_inbuf(n, SZ_IN_CHUNK) != 0) goto oom;
+    break;
+  }
   case SZ_N_BCJ2:
     if(n->props_size != 0) {
       build_fail(b, SZ_CHAIN_ERR_LAYOUT, (int32_t)index, cd->method,
@@ -1499,16 +1786,32 @@ static int finish_check(sz_node *n, sz_chain_err_t *err) {
   return 0;
 }
 
+/* A password that decrypts to rubbish is indistinguishable from corrupt data,
+   so when a folder carried a 7zAES coder and the decode still failed, say so
+   in case the caller would rather retry with another password. */
+static void err_hint_password(sz_chain_err_t *err, const sz_build *b) {
+  size_t used;
+
+  if(!err || !b->has_aes || !b->password || !b->password[0]) return;
+  if(err->status != SZ_CHAIN_ERR_DATA) return;
+  used = strlen(err->message);
+  if(used + 32 >= sizeof(err->message)) return;
+  snprintf(err->message + used, sizeof(err->message) - used,
+           " (a wrong password looks like this)");
+}
+
 int sz_chain_decode(sz_chain *c, sz_chain_read_fn read_at, void *read_ctx,
                     sz_chain_sink_fn sink, void *sink_ctx,
                     sz_chain_cancel_fn cancel, void *cancel_ctx,
-                    uint32_t *crc_out, sz_chain_err_t *err) {
+                    const char *password, uint32_t *crc_out,
+                    sz_chain_err_t *err) {
   sz_build b;
   sz_node *root;
   uint8_t *out;
   uint64_t produced = 0;
   uint32_t crc = CRC_INIT_VAL;
   static int crc_table_ready;
+  static int aes_table_ready;
 
   if(err) memset(err, 0, sizeof(*err));
   if(!c || !read_at || !sink) {
@@ -1520,10 +1823,16 @@ int sz_chain_decode(sz_chain *c, sz_chain_read_fn read_at, void *read_ctx,
     CrcGenerateTable();
     crc_table_ready = 1;
   }
+  if(!aes_table_ready) {
+    AesGenTables();
+    Sha256Prepare();
+    aes_table_ready = 1;
+  }
 
   memset(&b, 0, sizeof(b));
   b.chain = c;
   b.err = err;
+  b.password = password;
   b.read_at = read_at;
   b.read_ctx = read_ctx;
   root = build_coder(&b, c->unpack_coder);
@@ -1556,6 +1865,7 @@ int sz_chain_decode(sz_chain *c, sz_chain_read_fn read_at, void *read_ctx,
       return -1;
     }
     if(node_pull(root, out, want, &got) != 0) {
+      err_hint_password(err, &b);
       free(out);
       free_nodes(&b);
       return -1;
@@ -1572,6 +1882,7 @@ int sz_chain_decode(sz_chain *c, sz_chain_read_fn read_at, void *read_ctx,
               (unsigned long long)(want - got),
               (unsigned long long)(produced + got),
               (unsigned long long)c->unpack_size);
+      err_hint_password(err, &b);
       free(out);
       free_nodes(&b);
       return -1;
@@ -1588,6 +1899,7 @@ int sz_chain_decode(sz_chain *c, sz_chain_read_fn read_at, void *read_ctx,
   }
 
   if(finish_check(root, err) != 0) {
+    err_hint_password(err, &b);
     free(out);
     free_nodes(&b);
     return -1;

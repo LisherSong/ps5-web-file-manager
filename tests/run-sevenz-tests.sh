@@ -23,9 +23,14 @@ CC="${CC:-gcc}"
 
 # Archives the engine cannot read yet.  Each entry needs a reason; when one of
 # them starts passing the script says so, so the list cannot rot.
-KNOWN_GAPS="aes aeshe"
-#   aes         - 7zAES coder not implemented yet
-#   aeshe       - encrypted header (-mhe=on), same coder
+KNOWN_GAPS="aeshe"
+#   aeshe       - the header itself is encrypted (-mhe=on).  Reading it means
+#                 decrypting a standalone 7z stream *before* any folder is
+#                 known, i.e. a header parser of our own; the vendored SDK
+#                 refuses with SZ_ERROR_UNSUPPORTED before we are involved.
+
+# Must match PASSWORD in tests/make_sevenz_fixtures.py.
+FIXTURE_PASSWORD="Secret123"
 
 find "$BUILD" -maxdepth 1 -type f \( -name '*.o' -o -name '*.exe' \) -delete 2>/dev/null || true
 mkdir -p "$BUILD"
@@ -92,15 +97,22 @@ is_gap() {
 }
 
 run_case() {
-  local name="$1" archive="$2"
-  local out log
+  local name="$1" archive="$2" password="${3:-}"
+  local out log rc
 
   # A fresh directory per case keeps the run repeatable without deleting a tree
   # of previous results, which guarded shells refuse to do.
   out="$(mktemp -d "$BUILD/out/XXXXXX")" || return
   log="$out.log"
 
-  if "$BUILD/sevenz_chain_e2e" "$archive" "$out" >"$log" 2>&1 &&
+  rc=0
+  if [ -n "$password" ]; then
+    "$BUILD/sevenz_chain_e2e" "$archive" "$out" "$password" >"$log" 2>&1 || rc=$?
+  else
+    "$BUILD/sevenz_chain_e2e" "$archive" "$out" >"$log" 2>&1 || rc=$?
+  fi
+
+  if [ "$rc" -eq 0 ] &&
      diff -r "$FIXTURES/_src" "$out/_src" >/dev/null 2>&1; then
     if is_gap "$name"; then
       printf '  %-12s GAP CLOSED (remove from KNOWN_GAPS)\n' "$name"
@@ -125,7 +137,10 @@ run_case() {
 echo "== 7z fixture matrix (engine: src/sevenz_chain.c) =="
 for a in store lzma2 lzma ppmd bcj delta utf8 bcj2 solidoff bcj2off aes aeshe; do
   [ -f "$FIXTURES/$a.7z" ] || continue
-  run_case "$a" "$FIXTURES/$a.7z"
+  case "$a" in
+    aes|aeshe) run_case "$a" "$FIXTURES/$a.7z" "$FIXTURE_PASSWORD" ;;
+    *) run_case "$a" "$FIXTURES/$a.7z" ;;
+  esac
 done
 if [ -f "$FIXTURES/vol.7z.001" ]; then
   run_case "vol.7z.001" "$FIXTURES/vol.7z.001"

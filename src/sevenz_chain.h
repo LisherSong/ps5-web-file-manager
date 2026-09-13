@@ -28,9 +28,20 @@
        that was allowed, so the UI can say something useful instead of
        "corrupt archive".
 
+   Supported here:
+     * Copy, LZMA, LZMA2 and PPMd
+     * the Delta filter and the x86 / PPC / IA64 / ARM / ARMT / SPARC branch
+       converters
+     * BCJ2, whose three side streams are materialised under a limit while
+       MAIN keeps streaming
+     * 7zAES (method 0x06F10701), the coder 7-Zip wraps around the streams when
+       `-p` is used, driven from a caller supplied password
+
    Not supported here (by design, see sz_chain_check):
-     * 7zAES (method 0x06F10701) -- needs its own implementation, it is not in
-       the SDK's C decoder.  Reported as SZ_CHAIN_ERR_METHOD.
+     * an encrypted *header* (`-mhe=on`): that is not a coder in a folder but a
+       second, encrypted copy of the archive header, which has to be decrypted
+       and parsed before any folder exists at all.  Reported by the SDK header
+       reader as SZ_ERROR_UNSUPPORTED, not by this module.
 */
 
 #ifndef SEVENZ_CHAIN_H
@@ -51,6 +62,7 @@ typedef struct {
   uint64_t max_dict_bytes; /* LZMA / LZMA2 window */
   uint64_t max_ppmd_bytes; /* PPMd model */
   uint64_t max_side_bytes; /* BCJ2 CALL + JUMP + RC together */
+  uint32_t max_aes_cycles; /* 7zAES key derivation: 2^n SHA-256 passes */
 } sz_chain_limits_t;
 
 #define SZ_CHAIN_LIMITS_DEFAULT 0
@@ -66,6 +78,8 @@ typedef enum {
   SZ_CHAIN_ERR_METHOD,  /* coder method not supported */
   SZ_CHAIN_ERR_LAYOUT,  /* coder graph shape not supported */
   SZ_CHAIN_ERR_LIMIT,   /* a sz_chain_limits_t ceiling was hit */
+  SZ_CHAIN_ERR_PASSWORD,/* the archive is encrypted and no usable password
+                           was supplied (or the one given is wrong) */
   SZ_CHAIN_ERR_READ,    /* the read callback failed */
   SZ_CHAIN_ERR_WRITE,   /* the sink callback failed */
   SZ_CHAIN_ERR_DATA,    /* a decoder rejected the data */
@@ -116,6 +130,9 @@ void sz_chain_free(sz_chain *c);
 
 uint32_t sz_chain_num_coders(const sz_chain *c);
 uint32_t sz_chain_num_pack_streams(const sz_chain *c);
+/* Non-zero when the folder contains a 7zAES coder, i.e. when sz_chain_decode()
+   will need a password.  Lets a caller ask for one before touching the disk. */
+int sz_chain_needs_password(const sz_chain *c);
 /* Method id of coder `index`, or -1 when out of range. */
 int64_t sz_chain_coder_method(const sz_chain *c, uint32_t index);
 
@@ -146,12 +163,20 @@ typedef int (*sz_chain_cancel_fn)(void *ctx);
    declared unpack size.  When crc_out is not NULL it receives the CRC-32 of
    the delivered bytes, for the caller to compare with the folder CRC.
 
+   `password` is the archive password as UTF-8, or NULL / "" when the caller
+   has none.  It is only consulted by folders that contain a 7zAES coder; a
+   folder that needs one without a password fails as SZ_CHAIN_ERR_PASSWORD
+   before any data is read, so the caller can prompt and retry.  A password
+   containing NUL is not supported: 7-Zip stores it as UTF-16LE and the
+   conversion stops at the terminator.
+
    Returns 0 on success, -1 on failure with err filled.  A failing sink is
    reported as SZ_CHAIN_ERR_WRITE; the caller is expected to make its own
    message more specific. */
 int sz_chain_decode(sz_chain *c, sz_chain_read_fn read_at, void *read_ctx,
                     sz_chain_sink_fn sink, void *sink_ctx,
                     sz_chain_cancel_fn cancel, void *cancel_ctx,
-                    uint32_t *crc_out, sz_chain_err_t *err);
+                    const char *password, uint32_t *crc_out,
+                    sz_chain_err_t *err);
 
 #endif /* SEVENZ_CHAIN_H */

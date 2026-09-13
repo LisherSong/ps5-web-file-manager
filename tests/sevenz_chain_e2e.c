@@ -348,7 +348,7 @@ int main(int argc, char **argv) {
   int rc = 0;
 
   if(argc < 3) {
-    fprintf(stderr, "usage: %s <archive.7z> <out-dir>\n", argv[0]);
+    fprintf(stderr, "usage: %s <archive.7z> <out-dir> [password]\n", argv[0]);
     return 2;
   }
 
@@ -375,8 +375,15 @@ int main(int argc, char **argv) {
 
   res = SzArEx_Open(&db, &look_stream.vt, &g_alloc, &g_temp);
   if(res != SZ_OK) {
-    fprintf(stderr, "%s: cannot read the 7z header (res=%d)\n", vol_desc,
-            (int)res);
+    if(res == SZ_ERROR_UNSUPPORTED)
+      fprintf(stderr,
+              "%s: the archive header is encrypted (-mhe=on); this build reads "
+              "encrypted *streams* only, so the header itself cannot be "
+              "decoded\n",
+              vol_desc);
+    else
+      fprintf(stderr, "%s: cannot read the 7z header (res=%d)\n", vol_desc,
+              (int)res);
     sevenz_volstream_free(vol);
     return 1;
   }
@@ -436,7 +443,8 @@ int main(int argc, char **argv) {
     {
       sz_chain_err_t derr;
       if(sz_chain_decode(chain, reader_at, &reader, sink_write, &sink, NULL,
-                         NULL, &folder_crc, &derr) != 0) {
+                         NULL, argc > 3 ? argv[3] : NULL, &folder_crc,
+                         &derr) != 0) {
         printf("folder %-2u FAIL decode [%s]: %s: %s (offset %llu)\n",
                (unsigned)folder, desc, sz_chain_status_string(derr.status),
                derr.message, (unsigned long long)derr.offset);
