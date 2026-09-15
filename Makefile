@@ -13,7 +13,10 @@ ifeq ($(MAKECMDGOALS),)
   endif
 endif
 
-VERSION_TAG := v1.9
+# Bump this together with the git tag -- it is what the PS5 notification and
+# `./web-file-mgr.elf --version` print, so a stale value silently mislabels the
+# binary. Override per-build with: make VERSION_TAG=v1.9.2
+VERSION_TAG ?= v1.9.1
 TITLE_ID    := FMGR88888
 PYTHON      ?= python3
 STRIP       ?= $(PS5_PAYLOAD_SDK)/bin/prospero-strip

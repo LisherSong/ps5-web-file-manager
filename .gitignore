@@ -5,23 +5,17 @@
 gen/
 web-file-mgr-linux
 
-# Sandbox probe scratch under .build/ (the tracked items there are
-# build-elf.sh / build-elf-wsl.sh / build-win.sh / build-elf.log,
-# check-elf-*.py and extract-demo.html; everything
-# else is local exploration that should not enter the repo).
-.build/host-test/
-.build/obj/
-.build/probe-work/
-.build/tp/
-.build/stub/
-.build/*.exe
-.build/*.c
-.build/test-out.txt
-
-# 7z work area: downloaded SDK + 7-Zip binaries and local build output.
-.build/7zdl/
-.build/7zh/
-.build/sevenz-test/
+# Sandbox scratch under .build/: ignore the whole directory, then re-allow the
+# handful of files that are actually part of the repo (build scripts + the
+# ELF checker). A whitelist is the only thing that survives -- every debugging
+# session drops a new probe directory in here.
+.build/*
+!.build/build-elf.sh
+!.build/build-elf-wsl.sh
+!.build/build-win.sh
+!.build/check-elf-*.py
+!.build/extract-demo.html
+!.build/build-elf.log
 
 # Generated 7z fixtures (tests/make_sevenz_fixtures.py rebuilds them).
 tests/fixtures-7z/
@@ -32,3 +26,6 @@ tests/fixtures-7z/
 *.swp
 .DS_Store
 Thumbs.db
+
+# WorkBuddy session data (never commit; also never delete).
+.workbuddy/
