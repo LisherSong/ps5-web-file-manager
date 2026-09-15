@@ -2399,6 +2399,7 @@ filemgr_api_request(struct MHD_Connection *conn, const char *url,
   if(!strcmp(url, "/api/list")) return api_list(conn);
   if(!strcmp(url, "/api/tasks")) return api_tasks(conn);
   if(!strcmp(url, "/api/space")) return api_space(conn);
+  if(!strcmp(url, "/api/version")) return api_version(conn);
   if(!strcmp(url, "/api/cancel")) return api_cancel(conn);
   if(!strcmp(url, "/api/exit")) return api_exit(conn);
   if(!strcmp(url, "/api/copy")) return api_copy(conn, body, body_size);

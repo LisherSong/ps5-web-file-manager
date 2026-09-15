@@ -35,7 +35,11 @@ let uploadXhr = null;
 let uploadTerminalAbort = false;
 let L = {};
 
-const APP_VERSION = "v1.9";
+// Last-resort fallback for the footer. The real value comes from
+// /api/version, which reports the build's VERSION_TAG -- see loadVersion().
+// Keeping a literal here used to be the only source, and it inevitably
+// drifted (the footer said "v1.9" throughout the v1.9.1 release).
+const APP_VERSION_FALLBACK = "v1.9.1";
 const LAST_PATH_KEY = "ps5-web-file-mgr:last-path";
 const SORT_KEY = "ps5-web-file-mgr:list-sort";
 const LOADING_DISPLAY_DELAY = 250;
@@ -180,8 +184,20 @@ function applyStaticText() {
   exitBtn.setAttribute("aria-label", t("exit"));
   parentBtn.title = t("parent");
   parentBtn.setAttribute("aria-label", t("parent"));
-  versionEl.textContent = APP_VERSION;
+  versionEl.textContent = APP_VERSION_FALLBACK;
   if (initLoadingEl) initLoadingEl.hidden = true;
+}
+
+// Ask the backend which version it was built as, so the footer can never
+// disagree with the Makefile. A failure here is cosmetic: we simply keep the
+// fallback text rather than nagging the user with an error toast.
+async function loadVersion() {
+  try {
+    const data = await api("/api/version");
+    if (data && data.version) versionEl.textContent = data.version;
+  } catch (err) {
+    /* offline or very old payload -- keep APP_VERSION_FALLBACK */
+  }
 }
 
 function nextPaint() {
@@ -2628,6 +2644,7 @@ contentEl.addEventListener("scroll", () => {
 async function init() {
   await loadLanguage();
   applyStaticText();
+  loadVersion();
   readSavedSort();
   updateSortHeaders();
   const savedPath = historyPath() || readSavedPath();
