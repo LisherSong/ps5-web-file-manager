@@ -24,17 +24,15 @@ HOST_SCRIPT="$REPO/.build/build-elf-wsl.sh"
 
 [ -f "$HOST_SCRIPT" ] || { echo "[FAIL] 找不到 $HOST_SCRIPT"; exit 1; }
 
-# 先把 WSL 脚本推进去（.build/ 被 rsync 排除，WSL 侧可能没有）
-if ! wsl.exe -d "$WSL_DISTRO" -- test -f "$WSL_DIR/build-elf-wsl.sh" 2>/dev/null; then
-  echo "[setup] WSL 侧缺少脚本，拷贝中..."
-  wsl.exe -d "$WSL_DISTRO" -- mkdir -p "$WSL_DIR" || exit 1
-  wsl.exe -d "$WSL_DISTRO" -- cp \
-    '/mnt/c/Users/songl/Desktop/Web File Manager/ps5-web-file-manager/.build/build-elf-wsl.sh' \
-    "$WSL_DIR/build-elf-wsl.sh" || {
-      echo "[FAIL] 无法写入 WSL 文件系统"
-      exit 1
-    }
-fi
+# 每次都把最新的 WSL 脚本推进去（.build/ 被 rsync 排除，WSL 侧不会自己更新；
+# 只做一次会导致改了脚本还在跑旧版 —— 这个坑踩过）
+wsl.exe -d "$WSL_DISTRO" -- mkdir -p "$WSL_DIR" || exit 1
+wsl.exe -d "$WSL_DISTRO" -- cp \
+  '/mnt/c/Users/songl/Desktop/Web File Manager/ps5-web-file-manager/.build/build-elf-wsl.sh' \
+  "$WSL_DIR/build-elf-wsl.sh" || {
+    echo "[FAIL] 无法写入 WSL 文件系统"
+    exit 1
+  }
 
 echo "[run] wsl.exe -d $WSL_DISTRO -- bash < build-elf-wsl.sh"
 echo "=================================================================="
@@ -43,7 +41,9 @@ rc=$?
 echo "=================================================================="
 
 if [ "$rc" -eq 0 ]; then
-  echo "[OK] 构建完成 -> $REPO/web-file-mgr.elf"
+  # 输出文件带版本号（web-file-mgr-<VERSION_TAG>.elf），列出实际产物
+  echo "[OK] 构建完成，产物："
+  ls -1 "$REPO"/web-file-mgr-*.elf 2>/dev/null | sed 's#^#    #'
 else
   echo "[FAIL] 构建失败 (exit=$rc)"
 fi

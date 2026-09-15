@@ -22,7 +22,6 @@ set -uo pipefail
 SRC_WIN='/mnt/c/Users/songl/Desktop/Web File Manager/ps5-web-file-manager'
 PROJ='/home/song/ps5-web-file-manager'
 SDK='/opt/ps5-payload-sdk'
-ELF="$PROJ/web-file-mgr.elf"
 
 log()  { printf '\033[1;36m%s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31m[FAIL] %s\033[0m\n' "$*"; exit 1; }
@@ -51,7 +50,7 @@ mkdir -p "$PROJ"
 
 rsync -a --delete \
   --exclude='/ps5-obj' --exclude='/linux-obj' \
-  --exclude='/web-file-mgr.elf' --exclude='/web-file-mgr-linux' \
+  --exclude='/web-file-mgr-*.elf' --exclude='/web-file-mgr-linux*' \
   --exclude='/gen' --exclude='/.build' --exclude='/tests' \
   --exclude='/docs' --exclude='/HANDOVER.md' \
   --exclude='/README.md' --exclude='/CHANGELOG.md' \
@@ -73,7 +72,16 @@ for f in src/sevenz_extract.c src/zipx_common.c src/sevenz_volstream.c \
   [ -f "$PROJ/$f" ] || fail "同步后缺失: $PROJ/$f"
 done
 [ -d "$PROJ/third_party/7z" ] || fail "同步后缺失: $PROJ/third_party/7z"
+
+# 输出文件名由 Makefile 的 VERSION_TAG 决定（web-file-mgr-<ver>.elf）。
+# 从 Makefile 里读，别在脚本里硬编 —— 否则改了版本号脚本还在找旧名字。
+VERSION=$(sed -n 's/^VERSION_TAG *[?:]*= *//p' "$PROJ/Makefile" | head -1)
+[ -n "$VERSION" ] || fail "读不到 VERSION_TAG: $PROJ/Makefile"
+BIN_NAME="web-file-mgr-${VERSION}.elf"
+ELF="$PROJ/$BIN_NAME"
+
 echo "  src/ + assets/ + third_party/ + Makefile  OK"
+echo "  版本: $VERSION  ->  输出: $BIN_NAME"
 echo
 
 # ---------------------------------------------------------- 3/5 编译 ------
@@ -113,8 +121,13 @@ echo
 
 # ------------------------------------------------- 5/5 拷回 Windows -------
 log "[5/5] 拷回 Windows"
-cp -f "$ELF" "$SRC_WIN/web-file-mgr.elf" || fail "拷回 Windows 失败"
-ls -lh "$SRC_WIN/web-file-mgr.elf"
+cp -f "$ELF" "$SRC_WIN/$BIN_NAME" || fail "拷回 Windows 失败"
+ls -lh "$SRC_WIN/$BIN_NAME"
 echo
-printf '\033[1;32m[DONE]\033[0m %s\n' "$SRC_WIN/web-file-mgr.elf"
+printf '\033[1;32m[DONE]\033[0m %s\n' "$SRC_WIN/$BIN_NAME"
 echo "  $SIZE bytes / sha256 $HASH / e_machine 0x$EM"
+
+# 顺便报告 Windows 侧现在有哪些版本化 ELF，方便挑一个拷进 U 盘
+echo
+echo "  Windows 项目根现有的 ELF："
+ls -1 "$SRC_WIN"/web-file-mgr-*.elf 2>/dev/null | sed 's#.*/##' | sed 's/^/    /' || true

@@ -13,9 +13,10 @@ ifeq ($(MAKECMDGOALS),)
   endif
 endif
 
-# Bump this together with the git tag -- it is what the PS5 notification and
-# `./web-file-mgr.elf --version` print, so a stale value silently mislabels the
-# binary. Override per-build with: make VERSION_TAG=v1.9.2
+# Bump this together with the git tag -- it is baked into the binary (the PS5
+# notification and `--version` print it) AND into the output filename, so a
+# stale value silently mislabels everything. Override per-build with:
+#   make VERSION_TAG=v1.9.2
 VERSION_TAG ?= v1.9.1
 TITLE_ID    := FMGR88888
 PYTHON      ?= python3
@@ -25,8 +26,10 @@ HOST_CC     ?= cc
 HOST_STRIP  ?= strip
 HOST_PKG_CONFIG ?= pkg-config
 
-BIN        := web-file-mgr.elf
-LINUX_BIN  := web-file-mgr-linux
+# Output filename carries the version so two builds never overwrite each other
+# and you can tell at a glance which ELF is on the USB stick.
+BIN        := web-file-mgr-$(VERSION_TAG).elf
+LINUX_BIN  := web-file-mgr-linux-$(VERSION_TAG)
 COMMON_SRCS := src/main.c src/websrv.c src/filemgr.c src/file_response.c src/task.c src/upload.c src/download.c src/text.c src/list.c src/space.c src/fs_util.c src/json_util.c src/path_util.c src/asset.c src/mime.c src/notify.c src/pkg_installer.c src/pkg_info.c src/extract.c src/zip_extract.c src/rar_extract.c src/zipx_volume.c src/zipx_volstream.c src/zipx_common.c src/sevenz_extract.c src/sevenz_chain.c src/sevenz_volstream.c
 PS5_SRCS    := $(COMMON_SRCS) src/app_installer.c src/cpu_support_stub.c
 LINUX_SRCS  := $(COMMON_SRCS)
