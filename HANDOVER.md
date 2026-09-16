@@ -258,7 +258,7 @@ ELF 已构建，但需装 PS5 实测：
 
 ### 可选项（非阻塞）
 
-- **性能**：实测上游（7-Zip 本体）在 **7z 格式上快 1.9×（单线程）/ 3.4×（8 线程）**；ZIP 无显著差异。差距不在我们的架构（我们比 SDK 自己的 `SzArEx` 路径还快 1.02×）。**汇编解码器已于 2026-09-16 启用**（`Asm/x86/LzmaDecOpt.asm` + jwasm + `-DZ7_LZMA_DEC_OPT`，1.26×，无 jwasm 自动退纯 C），剩余差距是**多线程 LZMA2**（未做）。完整数据与复现方式见 `docs/EXTRACTION-PERF.md`，基准工具 `tests/bench_driver.py`
+- **性能**：实测上游（7-Zip 本体）在 **7z 格式上快 1.9×（单线程）/ 3.4×（8 线程）**；ZIP 无显著差异。差距不在我们的架构（我们比 SDK 自己的 `SzArEx` 路径还快 1.02×）。**已全部落地（2026-09-16）**：①汇编解码器（`LzmaDecOpt.asm`+jwasm，1.26×，无 jwasm 自动退纯 C）②多线程 LZMA2（`Lzma2DecMt`，8 线程，1.37×，线程失败自动降级 chain；BCJ2/加密布局仍走 chain）③ZIP 逐条目 fsync 移除（8000 文件 ≥14×）。7z 现与 7-Zip 单线程打平、ZIP 已压过官方（本机受 Defender 拖累不可比，PS5 无该因素）。RAR 与官方 UnRAR 同速（unrar 自带 `target("aes")` SIMD 已启用，无逐条目 fsync）。完整数据见 `docs/EXTRACTION-PERF.md`，基准工具 `tests/bench_driver.py`
 - fsync 批量化（每 64MB/N 条刷一次）—— 9.5 万文件级可省 20–30 分钟
 - 解压失败保留 staging 支持续解（中等改动）
 - 进度条 % / 文字进度 / ETA 三处口径统一为字节

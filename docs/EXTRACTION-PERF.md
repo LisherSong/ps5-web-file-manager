@@ -7,8 +7,18 @@
 > `third_party/7z/`，jwasm `-elf64 -DABI_LINUX` 汇编进 PS5 与 Linux 两条链路，
 > `LzmaDec.o` 加 `-DZ7_LZMA_DEC_OPT`。实测 **1.39 s → 1.05–1.13 s（1.26×）**，解出字节与
 > C 版逐字节一致；7z 测试矩阵 28 checks 全过。Makefile 对该优化做了条件化（无 jwasm 自动
-> 退回纯 C）并依赖 Makefile 本身触发重编（flag 变化不会被 make 察觉）。ELF
-> 1,017,944 B / sha256 `7fc0881b…`。方案 B（多线程）仍未做，见第四节。
+> 退回纯 C）并依赖 Makefile 本身触发重编（flag 变化不会被 make 察觉）。
+>
+> **✅ 方案 B 已落地（2026-09-16）**：`Lzma2DecMt.c` + `MtDec.c` + `Threads.c` 已 vendor，
+> 单一纯 LZMA2 folder（7-Zip 默认布局）走 SDK 并行解码器（`src/sevenz_mt.c` 适配层），
+> 8 线程 + 1 MiB inBufSize_MT；`SZ_ERROR_THREAD` 自动降级回单线程 chain（BCJ2/加密/奇异
+> 布局本来就由 chain 负责）。实测 329 MiB：1.05 s → **0.77 s（1.37×）**，与 7za -mmt=off
+> 打平（898 ms）；7za -mmt=8 = 485 ms。7z/ZIP/RAR 163 checks 全绿。
+>
+> **✅ ZIP 引擎 fsync 批量化（2026-09-16）**：逐条目 fsync 已移除（publish 是纯 rename、
+> 无续解功能，该 fsync 无收益；RAR/7z 引擎本来就没有）。8000 文件 fixture：fsync 版
+> \>200 s 未完成 → 无 fsync **14.5 s（≥14×）**。同机官方 7-Zip 反而要 >400 s（Defender
+> 实时扫描逐文件查杀；PS5 无此因素）。
 
 ## 结论
 
