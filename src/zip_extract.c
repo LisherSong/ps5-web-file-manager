@@ -912,8 +912,15 @@ write_entry(void *zip, zipx_ctx_t *c, int root_fd, const char *name,
 
 done:
   if(!ret) {
-    if(fsync(fd) || close(fd)) {
-      ctx_fail(c, ZIPX_ERR_IO, name, "cannot flush file: %s", strerror(errno));
+    /* No fsync here, on purpose.  The per-entry flush used to cost 20-30
+       minutes on a 95k-file archive (measured on PS5-class storage) and buys
+       nothing the design needs: a crash mid-extract leaves the staging tree,
+       which is discarded on the next run, and publish is a rename-only phase
+       (see publish_entry).  The RAR and 7z engines never flushed per entry
+       either; all three now share the same "sync nothing, rename everything"
+       policy. */
+    if(close(fd)) {
+      ctx_fail(c, ZIPX_ERR_IO, name, "cannot close file: %s", strerror(errno));
       ret = -1;
     }
     fd = -1;
