@@ -87,6 +87,10 @@ enum {
 #define SZ_IN_CHUNK (1u << 18)
 #define SZ_FILT_CHUNK (1u << 17)
 #define SZ_BCJ2_MAIN_CHUNK (1u << 17)
+/* How much the top of the chain is asked for per pull.  Raising this from
+   64 KiB to 1 MiB was measured and changed nothing (1.39 s vs 1.40 s on a
+   330 MiB folder), so the cost is not in per-pull dispatch -- see
+   docs/EXTRACTION-PERF.md.  Kept at 64 KiB: smaller cache footprint. */
 #define SZ_OUT_CHUNK (1u << 16)
 /* Branch converters keep a few tail bytes for their next call. */
 #define SZ_FILT_LOOKAHEAD 8

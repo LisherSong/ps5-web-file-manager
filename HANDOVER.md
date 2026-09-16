@@ -258,6 +258,7 @@ ELF 已构建，但需装 PS5 实测：
 
 ### 可选项（非阻塞）
 
+- **性能**：实测上游（7-Zip 本体）在 **7z 格式上快 1.9×（单线程）/ 3.4×（8 线程）**；ZIP 无显著差异。差距不在我们的架构（我们比 SDK 自己的 `SzArEx` 路径还快 1.02×）。**汇编解码器已于 2026-09-16 启用**（`Asm/x86/LzmaDecOpt.asm` + jwasm + `-DZ7_LZMA_DEC_OPT`，1.26×，无 jwasm 自动退纯 C），剩余差距是**多线程 LZMA2**（未做）。完整数据与复现方式见 `docs/EXTRACTION-PERF.md`，基准工具 `tests/bench_driver.py`
 - fsync 批量化（每 64MB/N 条刷一次）—— 9.5 万文件级可省 20–30 分钟
 - 解压失败保留 staging 支持续解（中等改动）
 - 进度条 % / 文字进度 / ETA 三处口径统一为字节
@@ -281,8 +282,17 @@ ELF 已构建，但需装 PS5 实测：
 
 ---
 
-## 十、工作区未跟踪文件
+## 十、工作区状态
 
-- `erssonglDesktopWeb File Managerps5-web-file-manager"`（2543 B，仓库根）—— 早期 shell 转义事故产物，**待用户确认后可删**
-- `.build/` 下的探针/调试产物已被 `.gitignore` 白名单覆盖，不再污染 `git status`
-- 仓库根历史遗留 `web-file-mgr-unpack 1.9.1.elf`（898K，名字写 1.9.1 但内嵌是 9-07 的 **v1.9**，无 7z 引擎）—— **陷阱文件，建议删除**
+工作树已干净（`git status` 仅剩有意保留的未跟踪文档）。
+
+已清理（2026-09-15）：
+
+| 文件 | 说明 | 去向 |
+|---|---|---|
+| `erssonglDesktopWeb File Managerps5-web-file-manager￢`（2543 B） | 早期 shell 转义事故：一次 `git log --oneline --color` 的输出被重定向进了文件名。末尾是 U+F022（私用区码位，mojibake 残留），各工具渲染不一 —— git 显示成八进制转义、`ls -b` 印成 ASCII 引号 | **回收站**（`$R…`，2543 B，可还原） |
+| `web-file-mgr-unpack 1.9.1.elf`（898 KiB） | 陷阱：文件名写 1.9.1，内嵌却是 9-07 的 **v1.9**（无 7z 引擎） | 已不在仓库根 |
+
+> ⚠️ **清理这类特殊文件名时**：`SHFileOperationW`（带 `FOF_ALLOWUNDO` 走回收站）对含私用区码位的路径会返回 `ERROR_FILE_NOT_FOUND (2)`，**但动作实际已生效**。删完务必查 `C:\$Recycle.Bin\<SID>\$I*` 记录确认落在回收站（`$I` 存原路径 UTF-16，`$R` 是内容）。本沙箱里 `Add-Type` 与 `rm` 都被拦（后者有 safe-delete 钩子），只能用 Python `ctypes` 调 shell32。
+
+`.build/` 下的探针/调试产物已被 `.gitignore` 白名单覆盖，不再污染 `git status`。

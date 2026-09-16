@@ -88,6 +88,29 @@ THIRD_PARTY_C_FLAGS  := -O2 -w -Ithird_party/zlib/include -Ithird_party/minizip-
   -DHAVE_ZLIB -DZLIB_COMPAT -DHAVE_UNISTD_H=1 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE \
   -DHAVE_FSEEKO -DZ7_PPMD_SUPPORT
 THIRD_PARTY_C_FLAGS_7Z := $(THIRD_PARTY_C_FLAGS) $(SEVENZ_C_FLAGS)
+
+# Assembly-optimised LZMA decoder (optional, on when jwasm is present).
+#
+# LzmaDec.c carries a compile-time switch: with Z7_LZMA_DEC_OPT it calls an
+# external LzmaDec_DecodeReal_3() and drops its own C implementation; without
+# it, the C version is used. The asm version is measurably faster -- on a
+# 330 MiB LZMA2 archive, 1.10 s vs 1.39 s, i.e. most of the gap to the
+# official 7-Zip binary, which builds with this switch on.
+#
+# LzmaDecOpt.asm is MASM syntax, so it needs a MASM-compatible assembler
+# (jwasm). That is not something we can assume the host has, so the whole
+# optimisation is conditional: no jwasm, no asm, and the build still works.
+# ABI_LINUX is load-bearing -- 7zAsm.asm keys its calling convention off it
+# (SysV rdi/rsi/rdx vs Win64 rcx/rdx/r8); assembling without it links cleanly
+# and then segfaults on the first call.
+JWASM             ?= jwasm
+LZMA_DEC_ASM_DIR  := third_party/7z/Asm/x86
+LZMA_DEC_ASM_SRC  := $(LZMA_DEC_ASM_DIR)/LzmaDecOpt.asm
+ifneq ($(shell command -v $(JWASM) 2>/dev/null),)
+  LZMA_DEC_OPT_FLAG := -DZ7_LZMA_DEC_OPT
+  PS5_ASM_OBJS      := ps5-obj/$(LZMA_DEC_ASM_DIR)/LzmaDecOpt.o
+  LINUX_ASM_OBJS    := linux-obj/$(LZMA_DEC_ASM_DIR)/LzmaDecOpt.o
+endif
 UNRAR7_CXX_FLAGS     := -O2 -w -std=c++17 -DRARDLL -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
 # prospero-clang++ defaults to -stdlib=libc++; state it explicitly for clarity.
 UNRAR7_CXX_FLAGS_PS5 := $(UNRAR7_CXX_FLAGS) -stdlib=libc++
@@ -129,6 +152,21 @@ clean:
 gen/%.c: assets/% gen-asset-module.py | gen
 	$(PYTHON) gen-asset-module.py --path $* $< > $@
 
+# Only LzmaDec.c changes behaviour under the switch: it stops defining its own
+# decoder and declares the external symbol instead. Everything else in the 7z
+# TU family is unaffected.
+ifneq ($(LZMA_DEC_OPT_FLAG),)
+ps5-obj/third_party/7z/LzmaDec.o:   THIRD_PARTY_C_FLAGS_7Z += $(LZMA_DEC_OPT_FLAG)
+linux-obj/third_party/7z/LzmaDec.o: THIRD_PARTY_C_FLAGS_7Z += $(LZMA_DEC_OPT_FLAG)
+endif
+
+# make does not track flag changes, and installing or removing jwasm flips the
+# switch above. Without this, an existing LzmaDec.o silently keeps the old
+# decoder and the asm object just sits in the link line unreferenced (the
+# binary comes out byte-identical, which is how the problem was noticed).
+ps5-obj/third_party/7z/LzmaDec.o:   Makefile
+linux-obj/third_party/7z/LzmaDec.o: Makefile
+
 ps5-obj/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(if $(findstring third_party/7z,$<),$(THIRD_PARTY_C_FLAGS_7Z),$(THIRD_PARTY_C_FLAGS)) -c -o $@ $<
@@ -136,6 +174,16 @@ ps5-obj/%.o: %.c
 linux-obj/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(if $(findstring third_party/7z,$<),$(THIRD_PARTY_C_FLAGS_7Z),$(THIRD_PARTY_C_FLAGS)) -c -o $@ $<
+
+# The assembler emits a plain ELF64 relocatable object, which both linkers
+# (prospero-clang++ for PS5, cc for linux) accept as-is.
+ps5-obj/$(LZMA_DEC_ASM_DIR)/LzmaDecOpt.o: $(LZMA_DEC_ASM_SRC)
+	@mkdir -p $(dir $@)
+	$(JWASM) -elf64 -q -DABI_LINUX -I$(LZMA_DEC_ASM_DIR) -Fo$@ $<
+
+linux-obj/$(LZMA_DEC_ASM_DIR)/LzmaDecOpt.o: $(LZMA_DEC_ASM_SRC)
+	@mkdir -p $(dir $@)
+	$(JWASM) -elf64 -q -DABI_LINUX -I$(LZMA_DEC_ASM_DIR) -Fo$@ $<
 
 ps5-obj/%.o: %.cpp
 	@mkdir -p $(dir $@)
@@ -149,10 +197,10 @@ linux-obj/%.o: %.cpp
 # automatically for the unrar objects. The project's own C sources are passed
 # through -x c (clang++ would otherwise compile .c files as C++ and trip
 # -Wdeprecated); -x none restores extension-based handling for the .o files.
-$(BIN): $(PS5_SRCS) $(GEN_SRCS) $(PS5_TP_OBJS)
-	$(CXX) $(CFLAGS) $(LDFLAGS) -o $@ -x c $(filter %.c,$^) -x none $(PS5_TP_OBJS) $(LDADD)
+$(BIN): $(PS5_SRCS) $(GEN_SRCS) $(PS5_TP_OBJS) $(PS5_ASM_OBJS)
+	$(CXX) $(CFLAGS) $(LDFLAGS) -o $@ -x c $(filter %.c,$^) -x none $(PS5_TP_OBJS) $(PS5_ASM_OBJS) $(LDADD)
 	$(STRIP) $@
 
-$(LINUX_BIN): $(LINUX_SRCS) $(GEN_SRCS) $(LINUX_TP_OBJS)
-	$(HOST_CXX) $(LINUX_CFLAGS) -o $@ -x c $(filter %.c,$^) -x none $(LINUX_TP_OBJS) $(LINUX_LDADD)
+$(LINUX_BIN): $(LINUX_SRCS) $(GEN_SRCS) $(LINUX_TP_OBJS) $(LINUX_ASM_OBJS)
+	$(HOST_CXX) $(LINUX_CFLAGS) -o $@ -x c $(filter %.c,$^) -x none $(LINUX_TP_OBJS) $(LINUX_ASM_OBJS) $(LINUX_LDADD)
 	$(HOST_STRIP) $@

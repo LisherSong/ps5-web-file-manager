@@ -24,7 +24,40 @@ PROJ='/home/song/ps5-web-file-manager'
 SDK='/opt/ps5-payload-sdk'
 
 log()  { printf '\033[1;36m%s\033[0m\n' "$*"; }
+warn() { printf '\033[1;33m[WARN] %s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31m[FAIL] %s\033[0m\n' "$*"; exit 1; }
+
+# ------------------------------------------------------------ jwasm --------
+# The LZMA decoder has an asm implementation that is 26% faster than the C one
+# (see docs/EXTRACTION-PERF.md). It is MASM syntax, so a MASM-compatible
+# assembler is needed. Makefile only enables the optimisation when jwasm is on
+# PATH, so a failure here downgrades rather than breaks the build.
+JWASM_HOME="$HOME/.cache/wfm-jwasm"
+JWASM_BIN="$JWASM_HOME/jwasm"
+
+ensure_jwasm() {
+  if command -v jwasm >/dev/null 2>&1; then
+    echo "  jwasm: $(command -v jwasm)"
+    return 0
+  fi
+  if [ -x "$JWASM_BIN" ]; then
+    export PATH="$JWASM_HOME:$PATH"
+    echo "  jwasm: $JWASM_BIN (缓存)"
+    return 0
+  fi
+
+  echo "  jwasm 不在，正在从源码编译（首次约 30 秒）..."
+  mkdir -p "$JWASM_HOME" || return 1
+  if [ ! -d "$JWASM_HOME/src" ]; then
+    git clone --depth 1 https://github.com/Baron-von-Riedesel/JWasm.git \
+      "$JWASM_HOME/src" >/dev/null 2>&1 || return 1
+  fi
+  make -C "$JWASM_HOME/src" -f GccUnix.mak -j4 >/dev/null 2>&1 || return 1
+  cp -f "$JWASM_HOME/src/build/GccUnixR/jwasm" "$JWASM_BIN" || return 1
+  chmod +x "$JWASM_BIN" || return 1
+  export PATH="$JWASM_HOME:$PATH"
+  echo "  jwasm: $JWASM_BIN (已编译)"
+}
 
 # ------------------------------------------------------- 1/5 环境检查 -----
 log "[1/5] 环境检查"
@@ -42,6 +75,8 @@ export PKG_CONFIG="$SDK/bin/prospero-pkg-config"
 "$CC" --version | head -1
 "$PKG_CONFIG" --modversion libmicrohttpd 2>/dev/null \
   || fail "libmicrohttpd 未装到 sysroot —— 先跑一次完整的 build-elf.sh v4"
+
+ensure_jwasm || warn "jwasm 不可用 —— 将退回纯 C 解码器（约慢 26%）"
 echo
 
 # ------------------------------------------------------- 2/5 同步源码 -----
