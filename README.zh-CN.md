@@ -1,3 +1,7 @@
+<div align="right">
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
+</div>
+
 # PS5 网页文件管理器（PS5 Web File Manager）
 
 > 面向已越狱 PS5 主机的自制 HTTP 文件管理器。通过同一局域网内的任意浏览器（包括 PS5 自带浏览器）即可浏览、编辑、上传、下载并解压 ZIP / RAR / 7z 压缩包——单个自包含 ELF 载荷，无外部服务、无遥测上报。
