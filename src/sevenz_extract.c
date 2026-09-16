@@ -37,6 +37,7 @@
 #include "7zFile.h"
 
 #include "sevenz_chain.h"
+#include "sevenz_mt.h"
 #include "sevenz_volstream.h"
 
 #ifndef O_CLOEXEC
@@ -158,6 +159,12 @@ szx_report(szx_ctx_t *c, int phase, const char *current, int force) {
 static int
 szx_canceled(szx_ctx_t *c) {
   return c->cancel && c->cancel(c->userdata);
+}
+
+/* sz_chain_cancel_fn shape, for callbacks that want a void* context. */
+static int
+szx_cancel_cb(void *ctx) {
+  return szx_canceled((szx_ctx_t *)ctx);
 }
 
 /* Remembers what the publish phase put in dst_dir, so a later failure can undo
@@ -1303,18 +1310,50 @@ extract_folders(const CSzArEx *db, szx_ctx_t *c, szx_reader_t *reader) {
       break;
     }
 
-    if(sz_chain_decode(chain, szx_read_at, reader, szx_sink_write, &sink, NULL,
-                       NULL, c->password, &folder_crc, &cerr) != 0) {
-      /* A failure the sink already explained wins over the decoder's summary,
-         which can only say that the sink rejected data. */
-      if(c->result->status == ZIPX_OK) {
-        szx_decode_error(c, folder, &cerr, desc, encrypted);
+    {
+      /* A single plain LZMA2 coder (the default 7-Zip layout) goes through
+         the SDK's parallel decoder; everything else -- BCJ2 chains, encrypted
+         folders, exotic method stacks -- stays on the chain walk.  A thread
+         failure downgrades to the chain path, so the MT decoder can only
+         ever add speed, never take correctness away. */
+      uint8_t lzma2_prop = 0;
+      uint64_t lzma2_in = 0;
+      int decoded = 0;
+
+      if(!encrypted && sz_chain_lzma2_root(chain, &lzma2_prop, &lzma2_in)) {
+        sz_chain_err_t merr;
+        int mrc = szx_mt_decode(szx_read_at, reader, pack_positions[0],
+                                lzma2_in, lzma2_prop, unpack_size,
+                                szx_sink_write, &sink, szx_cancel_cb, c,
+                                &folder_crc, &merr);
+        if(mrc == 0) {
+          decoded = 1;
+        } else if(mrc != SZX_MT_ERR_THREADS) {
+          if(c->result->status == ZIPX_OK) {
+            szx_decode_error(c, folder, &merr, desc, encrypted);
+          }
+          szx_sink_close(&sink);
+          szx_plan_free(&sink);
+          sz_chain_free(chain);
+          ret = (int)c->result->status;
+          break;
+        }
       }
-      szx_sink_close(&sink);
-      szx_plan_free(&sink);
-      sz_chain_free(chain);
-      ret = (int)c->result->status;
-      break;
+
+      if(!decoded &&
+         sz_chain_decode(chain, szx_read_at, reader, szx_sink_write, &sink,
+                         NULL, NULL, c->password, &folder_crc, &cerr) != 0) {
+        /* A failure the sink already explained wins over the decoder's summary,
+           which can only say that the sink rejected data. */
+        if(c->result->status == ZIPX_OK) {
+          szx_decode_error(c, folder, &cerr, desc, encrypted);
+        }
+        szx_sink_close(&sink);
+        szx_plan_free(&sink);
+        sz_chain_free(chain);
+        ret = (int)c->result->status;
+        break;
+      }
     }
     szx_sink_close(&sink);
 

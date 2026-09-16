@@ -136,6 +136,11 @@ int sz_chain_needs_password(const sz_chain *c);
 /* Method id of coder `index`, or -1 when out of range. */
 int64_t sz_chain_coder_method(const sz_chain *c, uint32_t index);
 
+/* True when the folder is a single plain LZMA2 coder -- the shape the SDK's
+   multithreaded decoder covers.  Fills the coder's props byte and the packed
+   input size; both are only valid when this returns non-zero. */
+int sz_chain_lzma2_root(const sz_chain *c, uint8_t *prop, uint64_t *in_size);
+
 /* Writes e.g. "LZMA2 + BCJ2 (5 coders, 4 pack streams)" into buf. */
 void sz_chain_describe(const sz_chain *c, char *buf, size_t size);
 

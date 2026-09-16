@@ -41,8 +41,8 @@ SDK_BIN = os.path.join(SZ_BUILD, "sevenz_e2e.exe")
 VENDOR_7Z = ["7zAlloc", "7zArcIn", "7zBuf", "7zBuf2", "7zCrc", "7zCrcOpt",
              "7zDec", "7zFile", "7zStream", "Aes", "AesOpt", "Alloc", "Bcj2",
              "Bra", "Bra86", "BraIA64", "CpuArch", "Delta", "DllSecur",
-             "Lzma2Dec", "LzmaDec", "Ppmd7", "Ppmd7Dec", "Sha256",
-             "Sha256Opt", "SwapBytes"]
+             "Lzma2Dec", "LzmaDec", "Lzma2DecMt", "MtDec", "Threads", "Ppmd7",
+             "Ppmd7Dec", "Sha256", "Sha256Opt", "SwapBytes"]
 ZLIB = ["adler32", "crc32", "deflate", "inffast", "inflate", "inftrees",
         "trees", "zutil"]
 MINIZIP = ["mz_crypt", "mz_os", "mz_os_posix", "mz_strm", "mz_strm_mem",
@@ -61,7 +61,8 @@ def build_bench():
         return True
 
     needed = (objs(SZ_BUILD, ["sevenz_extract", "sevenz_chain",
-                              "sevenz_volstream", "zipx_common", "zipx_volume"])
+                              "sevenz_mt", "sevenz_volstream", "zipx_common",
+                              "zipx_volume"])
               + objs(HT_BUILD, ["zip_extract", "zipx_volstream"])
               + objs(HT_BUILD, ZLIB) + objs(HT_BUILD, MINIZIP)
               + objs(SZ_BUILD, VENDOR_7Z))

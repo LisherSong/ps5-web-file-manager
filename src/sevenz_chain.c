@@ -743,6 +743,24 @@ uint32_t sz_chain_num_pack_streams(const sz_chain *c) {
   return c ? c->num_pack_streams : 0;
 }
 
+/* True when the folder is exactly one LZMA2 coder: the shape the SDK's
+   multithreaded decoder (Lzma2DecMt) covers, and the shape 7-Zip writes by
+   default (-m0=lzma2 -ms=on).  Returns the coder's props byte (the dictionary
+   size selector) and the packed input size for it. */
+int sz_chain_lzma2_root(const sz_chain *c, uint8_t *prop, uint64_t *in_size) {
+  if(!c || c->num_coders != 1 || c->num_bonds != 0 ||
+     c->num_pack_streams != 1) {
+    return 0;
+  }
+  if(c->coder[0].method != SZ_M_LZMA2 || c->unpack_coder != 0 ||
+     c->coder[0].props_size != 1) {
+    return 0;
+  }
+  *prop = c->blob[c->coder[0].props_off];
+  *in_size = c->pack_positions[1] - c->pack_positions[0];
+  return 1;
+}
+
 int sz_chain_needs_password(const sz_chain *c) {
   uint32_t i;
   if(!c) return 0;

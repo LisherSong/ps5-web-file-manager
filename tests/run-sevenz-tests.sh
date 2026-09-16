@@ -57,6 +57,8 @@ done
   -I"$SEVENZ_DIR" -I"$ROOT/src" -o "$BUILD/sevenz_volstream.o" \
   "$ROOT/src/sevenz_volstream.c"
 "$CC" -c -O2 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE \
+  -I"$SEVENZ_DIR" -I"$ROOT/src" -o "$BUILD/sevenz_mt.o" "$ROOT/src/sevenz_mt.c"
+"$CC" -c -O2 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE \
   -I"$ROOT/src" -o "$BUILD/zipx_volume.o" "$ROOT/src/zipx_volume.c"
 
 # The extraction facade is engine code too, so it gets the host POSIX shim as
@@ -71,7 +73,8 @@ done
   -o "$BUILD/sevenz_extract.o" "$ROOT/src/sevenz_extract.c"
 
 ENGINE_OBJS=("$BUILD/sevenz_chain.o" "$BUILD/sevenz_volstream.o"
-             "$BUILD/zipx_volume.o" "$BUILD/zipx_common.o")
+             "$BUILD/sevenz_mt.o" "$BUILD/zipx_volume.o"
+             "$BUILD/zipx_common.o")
 
 FACADE_OBJS=("$BUILD/sevenz_extract.o" "${ENGINE_OBJS[@]}")
 
