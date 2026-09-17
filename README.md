@@ -1,3 +1,7 @@
+<div align="right">
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
+</div>
+
 # PS5 Web File Manager
 
 > Homebrew HTTP file manager for jailbroken PS5 consoles. Browse, edit, upload, download and extract ZIPs through any browser on the same network — single self-contained ELF payload, no external services, no telemetry.
