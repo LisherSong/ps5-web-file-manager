@@ -17,7 +17,7 @@ endif
 # notification and `--version` print it) AND into the output filename, so a
 # stale value silently mislabels everything. Override per-build with:
 #   make VERSION_TAG=v1.9.2
-VERSION_TAG ?= v1.9.1
+VERSION_TAG ?= v1.9.2
 TITLE_ID    := FMGR88888
 PYTHON      ?= python3
 STRIP       ?= $(PS5_PAYLOAD_SDK)/bin/prospero-strip

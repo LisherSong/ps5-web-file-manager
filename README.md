@@ -6,7 +6,7 @@
 
 > Homebrew HTTP file manager for jailbroken PS5 consoles. Browse, edit, upload, download and extract ZIPs through any browser on the same network — single self-contained ELF payload, no external services, no telemetry.
 
-**Version:** v1.9.1 · **Title ID:** `FMGR88888` · **License:** GPLv3+ · **Target:** `x86_64-sie-ps5`
+**Version:** v1.9.2 · **Title ID:** `FMGR88888` · **License:** GPLv3+ · **Target:** `x86_64-sie-ps5`
 
 ---
 
@@ -15,6 +15,13 @@
 A payload ELF that runs an HTTP file manager inside a jailbroken PS5. Open `http://<PS5_IP>:8888/` from any browser on the LAN — including the PS5 browser itself — to manage files on attached USB storage and the user partition. Designed for safely copying game-dump folders from USB to internal storage, but it also handles general file management, in-place text editing, PKG preview/install, image preview, and ZIP extraction with built-in zip-bomb protection.
 
 The same source tree builds a Linux binary for development and a PS5 payload ELF for deployment — see `make linux` below.
+
+## What's new in v1.9.2
+
+Version-string-only re-release. The `v1.9.1` tag sat four commits behind the
+tree that produced its binary, so the tag could not rebuild the published
+artifact; v1.9.2 is cut from the right commit. It is functionally identical to
+the v1.9.1 binary — the only change is the baked-in version string.
 
 ## What's new in v1.9
 

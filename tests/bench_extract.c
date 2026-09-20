@@ -1,4 +1,4 @@
-/* Wall-clock benchmark for the extraction paths, ZIP and 7z.
+/* Wall-clock benchmark for the extraction paths, ZIP, RAR and 7z.
  *
  *   bench_extract <archive> <out-dir> [password]
  *
@@ -10,7 +10,7 @@
  * Keeping it in-tree matters because "is our engine fast?" is a question that
  * will come up again, and the answer should be a command anyone can rerun
  * rather than a number somebody remembers. The format is picked from the
- * suffix so the same binary covers both engines.
+ * suffix so the same binary covers all three engines.
  */
 
 #include <stdio.h>
@@ -19,6 +19,10 @@
 #include <time.h>
 
 #include "sevenz_extract.h"
+
+#ifndef BENCH_NO_RAR
+#include "rar_extract.h"
+#endif
 
 static int
 has_suffix(const char *path, const char *suffix) {
@@ -77,6 +81,12 @@ main(int argc, char **argv) {
     format = "zip";
   }
 #endif
+#ifndef BENCH_NO_RAR
+  else if(has_suffix(archive, ".rar") || has_suffix(archive, ".part1.rar") ||
+            has_suffix(archive, ".r00")) {
+    format = "rar";
+  }
+#endif
   else {
     fprintf(stderr, "unsupported benchmark format: %s\n", archive);
     return 2;
@@ -84,6 +94,12 @@ main(int argc, char **argv) {
 
   memset(&result, 0, sizeof(result));
   started = now_seconds();
+#ifndef BENCH_NO_RAR
+  if(!strcmp(format, "rar")) {
+    status = rar_extract(archive, out_dir, ZIPX_CONFLICT_OVERWRITE,
+                         zipx_default_limits(), NULL, NULL, NULL, &result);
+  } else
+#endif
 #ifndef BENCH_SEVENZ_ONLY
   if(!strcmp(format, "zip")) {
     status = zipx_extract(archive, out_dir, ZIPX_CONFLICT_OVERWRITE,
@@ -105,7 +121,7 @@ main(int argc, char **argv) {
   printf("unpacked : %.1f MiB\n", mebibytes);
   printf("wall     : %.3f s\n", elapsed);
   if(elapsed > 0.0) {
-    printf("through  : %.1f MiB/s (single thread)\n", mebibytes / elapsed);
+    printf("through  : %.1f MiB/s\n", mebibytes / elapsed);
   }
   if(status != ZIPX_OK) {
     printf("detail   : %s\n", result.detail[0] ? result.detail : "(none)");

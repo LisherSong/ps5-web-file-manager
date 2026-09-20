@@ -1,10 +1,10 @@
 # 交接文档 — ps5-web-file-manager 工作进度
 
-> 交接时间：2026-09-15 · 分支 `main` · 最新提交 **`0d036a7`** · tag `v1.9.1` 指向 `1fa2f09`（**需重打到 `0d036a7`**）
+> 交接时间：2026-09-20 · 分支 `main` · 最新提交 **`807d129`** · tag **`v1.9.2`** 已重打到产出发布二进制的提交（此前 `v1.9.1` 落后 4 个提交，tag 与产物对不上）
 >
 > **主线（用户 2026-09-12 指令）**：「先从 zip 分卷开始吧，然后把六种组合打齐，并把密码通道补齐，注意一些报错信息提示的时候尽量详细准确」
 > **状态：主线全部闭合。** 六种组合（ZIP/RAR/7z × 单卷/分卷）+ 密码通道（RAR 加密 + 7zAES）+ 报错详细信息，全部落地、测试全绿、PS5 ELF 构建成功。
-> **剩余**：① 推送 `0d036a7`；② tag 重打；③ PS5 真机端到端验证；④ `-mhe=on` 加密头（唯一功能缺口）。
+> **剩余**：① PS5 真机端到端验证（**唯一还没过的关卡**）；② `-mhe=on` 加密头（唯一功能缺口）。
 
 ---
 
@@ -13,29 +13,27 @@
 | 维度 | 状态 |
 |---|---|
 | 解压引擎 | ZIP / RAR / 7z × 单卷/分卷（6 组合）+ 7zAES / RAR 加密 |
-| 主机测试 | **ZIP 108 + RAR 27 + 7z 28 = 163 checks，0 失败**（MinGW gcc 16.2.0） |
-| PS5 构建 | ✅ WSL prospero-clang 18.1.8，一键脚本可复现 |
-| ELF 产物 | `web-file-mgr-v1.9.1.elf` · 870,488 B · sha256 `24392aff6ddcca4dc0ea969cce356bd693ac52efe8a117d61ee1c814aa43cd07` · e_machine=0x003e（2026-09-20 瘦身后；瘦身前 1,017,864 B，见 `docs/SIZE-OPTIMIZATION.md`） |
-| GitHub | `main` 已推到 `1fa2f09`；`0d036a7` 待推；`v1.9.1` tag 待重打 |
+| 主机测试 | **ZIP 108 + RAR 27 + 7z 28 = 163 checks，0 失败**（MinGW gcc；2026-09-20 在 v1.9.2 树上复跑） |
+| PS5 构建 | ✅ WSL prospero-clang 18.1.8，一键脚本可复现；构建已实测**确定性**（同源两次构建 sha256 相同） |
+| ELF 产物 | `web-file-mgr-v1.9.2.elf` · 870,488 B · sha256 `177e90fecf93a0251e83f67884fba4551051be248330b0d70fda8ea732f88e84` · e_machine=0x003e（2026-09-20 瘦身后；瘦身前 1,017,864 B，见 `docs/SIZE-OPTIMIZATION.md`） |
+| GitHub | `main`（`807d129`）与 tag `v1.9.2` 均已推送；Release `v1.9.2` 资产为该 ELF |
 | 唯一功能缺口 | 7z `-mhe=on`（加密头） |
 
-### 待用户在自己终端执行
+### 发布命令（v1.9.2）
 
 ```bash
 cd "/c/Users/songl/Desktop/Web File Manager/ps5-web-file-manager"
 
-# 1) 推送本轮的 /api/version 改动
 git push origin main
+git push origin v1.9.2
 
-# 2) v1.9.1 重打到最新（1fa2f09 -> 0d036a7，让 tag 内含 /api/version + 新 ELF）
-git tag -f -a v1.9.1 -m "v1.9.1 -- 7z + multi-volume + 7zAES + PS5 build + version API" 0d036a7
-git push -f origin v1.9.1
-
-# 3) 可选：发 Release（附带 ELF）
-gh release create v1.9.1 --title "v1.9.1" --notes-file .git/tag-v191.txt web-file-mgr-v1.9.1.elf
+gh release create v1.9.2 web-file-mgr-v1.9.2.elf \
+  --repo LisherSong/ps5-web-file-manager --title "v1.9.2" --notes-file <notes.md>
 ```
 
-沙箱内 git 出站 HTTPS 被拦（502/403），推送只能用户侧执行。
+沙箱内 git 出站 HTTPS **可用**（早先记的"被拦"是误判：`timeout 25 git ...`
+命中的是 `C:\Windows\System32\TIMEOUT.EXE`，报参数错误而非网络错误）。`gh` 同样可用，
+所以 commit / tag / push / 发 Release 都可以在会话里直接跑。
 
 ---
 
@@ -69,7 +67,7 @@ bash /home/song/build.sh
 现在收敛到 `Makefile` 一处：
 
 ```make
-VERSION_TAG ?= v1.9.1            # 可用 make VERSION_TAG=v1.9.2 临时覆盖
+VERSION_TAG ?= v1.9.2            # 可用 make VERSION_TAG=v1.9.3 临时覆盖
 BIN        := web-file-mgr-$(VERSION_TAG).elf
 ```
 
@@ -81,12 +79,16 @@ BIN        := web-file-mgr-$(VERSION_TAG).elf
 | `1fa2f09` | 输出文件名派生自 `VERSION_TAG`；`build-elf-wsl.sh` 从 Makefile 反读版本（不硬编）；`build-win.sh` 每次都推 WSL 脚本（原来只在缺失时推，导致改了脚本 WSL 侧仍跑旧版） |
 | `0d036a7` | **新增 `/api/version`**，前端右下角改从后端取值（见 2.3） |
 
+⚠️ **`assets/main.js` 里还有第二处字面量** `APP_VERSION_FALLBACK`（`/api/version` 取不到时的兜底值）。
+它不在 Makefile 的控制范围内 —— **升版本号时必须一并改**，否则后端请求失败时页脚会显示旧版本。
+v1.9.2 就是这两处一起改的。
+
 ### 2.3 UI 版本号改由后端提供（`0d036a7`）
 
 **问题**：`assets/main.js:38` 的 `const APP_VERSION = "v1.9"` 与 Makefile 无关，必然漂移。
 
 **修法**：
-- 新 `src/version.c` — `GET /api/version` → `{"ok":true,"version":"v1.9.1","titleId":"FMGR88888"}`，直接来自 Makefile 已传的 `-DVERSION_TAG` / `-DTITLE_ID` 宏，没有第二处要记得改
+- 新 `src/version.c` — `GET /api/version` → `{"ok":true,"version":"v1.9.2","titleId":"FMGR88888"}`，直接来自 Makefile 已传的 `-DVERSION_TAG` / `-DTITLE_ID` 宏，没有第二处要记得改
 - `src/filemgr.c` 路由表加一行（紧邻 `/api/space`）+ `filemgr_internal.h` 声明 + `Makefile` `COMMON_SRCS`
 - 前端：字面量降级为 `APP_VERSION_FALLBACK`（先渲染，保证页脚不空），`loadVersion()` 后台刷新。**请求失败静默吞掉** —— 版本号显示错属于装饰性问题，不该弹错误 toast
 
@@ -135,15 +137,15 @@ cd "/c/Users/songl/Desktop/Web File Manager/ps5-web-file-manager"
 ### 4.2 验证清单
 
 ```bash
-ls -lh web-file-mgr-v1.9.1.elf
-sha256sum web-file-mgr-v1.9.1.elf
-od -An -tx2 -j18 -N2 web-file-mgr-v1.9.1.elf   # 期望 3e00
-strings -a web-file-mgr-v1.9.1.elf | grep -m1 '^v1\.'
+ls -lh web-file-mgr-v1.9.2.elf
+sha256sum web-file-mgr-v1.9.2.elf
+od -An -tx2 -j18 -N2 web-file-mgr-v1.9.2.elf   # 期望 3e00
+strings -a web-file-mgr-v1.9.2.elf | grep -m1 '^v1\.'
 ```
 
 ⚠️ `od -An -tx2` 打印的是**小端 short 的值**（`003e`），不是字节序（`3e00`）。脚本里比对用 `$((16#$EM))` 转数值（**62 = x86-64 ✅ / 183 = aarch64 ❌**）。
 
-⚠️ **sha256 只在源码不变时可复现**。核对版本请用 `strings ... | grep ^v1.9`，比 sha256 直观且抗噪。
+✅ **构建已实测可复现**（2026-09-20）：同一源码树两次构建 sha256 完全相同；把两处版本字面量回退成 `v1.9.1` 后重构，产物与已发布的 v1.9.1 ELF **逐字节一致**。所以 sha256 可以作为交付指纹用 —— 但它对任何源码改动都会全变（改一个字符串常量会令链接器重排 `.rodata` 字符串池，牵动 `.text` 里所有 RIP 相对位移，原始 diff 会放大到 5 万字节以上，属正常现象，别误判成"代码改了"）。核对版本仍推荐 `strings ... | grep '^v1\.'`，最直观。
 
 ### 4.3 构建坑（已修，改 Makefile 前必读）
 
@@ -254,7 +256,7 @@ ELF 已构建，但需装 PS5 实测：
 2. **加密 7z（7zAES）** 真机解压
 3. 160GB / 9.5 万文件大 ZIP
 4. 分卷 RAR 进度条实时走动
-5. UI 右下角版本号显示 `v1.9.1`
+5. UI 右下角版本号显示 `v1.9.2`（`/api/version` 与兜底字面量应一致）
 
 ### 可选项（非阻塞）
 

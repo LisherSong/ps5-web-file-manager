@@ -140,7 +140,7 @@ COMMON_SRCS := src/main.c src/websrv.c ... src/sevenz_mt.c src/demangle_stub.c
 
 | 检查项 | 结果 |
 |---|---|
-| `__cxa_demangle` 本体大小 | **14 B**（我们的桩） |
+| `__cxa_demangle` 本体大小 | **11 B**（我们的桩；原 demangler 入口是 1 701 B） |
 | `itanium_demangle::*` 符号残留 | **0** |
 | `__cxa_throw` | 存在 |
 | `__cxa_begin_catch` / `__cxa_end_catch` | 存在 |
@@ -202,3 +202,150 @@ LDFLAGS += -Wl,-z,pack-relative-relocs
 
 > 本次改动只动链接期（新增一个 TU + 一个 lld 参数），未触碰任何解压逻辑，
 > 因此 163 checks 的预期是"逐条不变"。
+
+**结果（2026-09-20）**：163 checks（ZIP 108 + RAR 27 + 7z 28）**0 失败**，
+`aeshe` 仍是已知的 `-mhe=on` 缺口。README / CHANGELOG / HANDOVER / 论坛帖里的
+产物指纹已同步为 870,488 B · sha256 `177e90fe…8e84`。
+
+---
+
+## 附录 A：v1.9.2 产物一致性验证（2026-09-20）
+
+v1.9.2 是一次"只改内嵌版本号"的重发（原 `v1.9.1` tag 落后产出发布二进制的提交
+4 个提交）。为确认这次重发**真的**只动了版本号，在 WSL 里做了下面的验证。
+
+### A.1 复现性实验（决定性证据）
+
+当前工作区相对 `HEAD` 只有两处改动：`Makefile` 的 `VERSION_TAG` 与
+`assets/main.js` 的 `APP_VERSION_FALLBACK`。把这两处用 `sed` 回退成 `v1.9.1`
+后重新构建：
+
+| 构建 | sha256 |
+|---|---|
+| 已发布的 v1.9.1 ELF | `24392aff6ddcca4dc0ea969cce356bd693ac52efe8a117d61ee1c814aa43cd07` |
+| 回退后重建的产物 | `24392aff6ddcca4dc0ea969cce356bd693ac52efe8a117d61ee1c814aa43cd07` |
+
+**逐字节相同。** 再恢复 `v1.9.2` 重构，sha256 也精确回到 `177e90fe…8e84`。
+
+→ 构建是**确定性**的，因此 v1.9.2 与 v1.9.1 的全部差异就等于那两处版本字面量。
+复现脚本：`.build/_repro.sh`。
+
+### A.2 为什么原始字节 diff 有 5.5 万字节 —— 别被吓到
+
+`cmp` 两个 ELF 会看到 **55,280 字节不同（6.35%）**，但这是链接器字符串池重排的
+副作用，不是代码变了：
+
+| section | 差异字节 | 占该 section |
+|---|---:|---:|
+| `.rodata` | 53,496 | 34.8% |
+| `.text` | 1,543 | 0.3% |
+| `.rela.dyn` | 241 | 0.9% |
+
+而**每个 section 的尺寸完全相同**（`.text` 538,336 = 538,336），段数也都 17 个。
+
+机制：`.rodata` 里 7 字节的 `"v1.9.1\0"` 被换成 `"v1.9.2\0"` 后落点变了，其后
+所有字符串整体平移 7 字节 → 指向它们的 `lea rdi,[rip+disp]` 位移和 `.rela.dyn`
+重定位加数全部跟着变。
+
+两条量化证据：
+
+| 检查 | 结果 |
+|---|---|
+| 指令**助记符**序列（`objdump -d --no-show-raw-insn` 只取 mnemonic） | 141,780 条 vs 141,780 条，**完全一致** —— 没有任何指令被增删改 |
+| `.text` 差异字节的增量分布 | 1,543 个里 **1,506 个恰好是 −7**（正是那个 7 字节平移）；`.rela.dyn` 241/241 个 8 字节字段减 7 |
+| 嵌入的 gzip 资产 | 6 个成员，5 个逐字节相同，唯一不同的是 `main.js`，且差异 = `APP_VERSION_FALLBACK` 那一行 |
+
+脚本：`.build/_diffmap.py`、`.build/_operandcheck.sh`、`.build/_fieldcheck.py`、
+`.build/_verify_v192b.py`、`.build/_seccmp.py`。
+
+### A.3 源码层的约束
+
+`VERSION_TAG` 在源码里**只出现在字符串上下文**：
+
+```
+src/version.c:29   json_escape(&b, VERSION_TAG);
+src/main.c:127     printf("version: %s\n", VERSION_TAG);
+src/main.c:147     notify_user("Web File Manager\nVersion: %s\nPort: %u", VERSION_TAG, port);
+```
+
+没有任何算术、比较或分支依赖它，因此改版本号在语言层面就不可能改变控制流。
+
+---
+
+## 附录 B：瘦身逐符号账目
+
+在 **同一个 Makefile / 同一个 `VERSION_TAG`（v1.9.2）** 下重建三个变体，差异只落在
+"有没有桩"和"有没有 ICF"这两处，因此是干净的 A/B/C 对照。
+
+| 变体 | 内容 | stripped | unstripped |
+|---|---|---:|---:|
+| `base` | 无桩、无 ICF（瘦身前） | **1,034,328** | 1,222,752 |
+| `nicf` | 有桩、无 ICF | **886,872** | 1,010,208 |
+| `new` | 有桩 + `--icf=all`（发布态） | **870,488** | 993,824 |
+
+拆分：桩贡献 **−147,456 B**，ICF 再贡献 **−16,384 B**，合计 **−163,840 B（−15.8%）**。
+
+### B.1 section 位移（base → new）
+
+| section | base | new | 差值 |
+|---|---:|---:|---:|
+| `.text` | 637,616 | 538,336 | −99,280 |
+| `.rela.dyn` | 54,816 | 25,800 | −29,016 |
+| `.eh_frame` | 58,904 | 43,972 | −14,932 |
+| `.data.rel.ro` | 20,192 | 9,328 | −10,864 |
+| `.rodata` | 162,016 | 153,664 | −8,352 |
+| `.eh_frame_hdr` | 12,540 | 9,108 | −3,432 |
+| `.gcc_except_table` | 8,500 | 7,364 | −1,136 |
+| `.dynsym` / `.dynstr` / `.got` | — | — | −24 / −9 / −8 |
+
+### B.2 符号集合差
+
+| 项 | 数量 |
+|---|---:|
+| base 定义符号 | 2,657 |
+| new 定义符号 | 2,029 |
+| base → new **消失** | **628** |
+| base → new **新增** | **0** |
+
+628 个消失符号的构成：
+
+- `itanium_demangle::*` —— **607**
+- `GCC_except_table*` —— **21**（上面那批代码自己的异常表标签，不是独立函数）
+
+### B.3 桩本体与 demangler 符号
+
+| 变体 | `__cxa_demangle` 符号大小 | `itanium_demangle` 符号数 |
+|---|---:|---:|
+| base | 1,701 B（真身） | 607 |
+| nicf | **11 B**（我们的桩） | **0** |
+| new | **11 B** | **0** |
+
+异常机制在所有三个变体里都完好：`__cxa_throw` / `__cxa_begin_catch` /
+`__cxa_end_catch` / `_Unwind_Resume` / `__gxx_personality_v0` /
+`__cxa_allocate_exception` / `__cxa_free_exception` 各 1 个，无变化。
+
+自有 `src/` 关键符号（`ctx_fail` / `rarx_fail` / `szx_fail` / `fnv1a` /
+`nameset_init` / `remove_tree` / `ensure_parent_dirs` / `zipx_volume_detect` /
+`sevenz_extract` / `rar_extract` / `filemgr_api_request` 等）base 与 new 数量一致。
+
+### B.4 ICF 折叠了什么
+
+**符号数 2,029 → 2,029，一个没少** —— ICF 是"合并"不是"删除"。共 **76 个折叠组**，
+全部含具名符号。典型几类：
+
+- 我们自己的同码副本：`ctx_fail == rarx_fail == szx_fail`、
+  `nameset_init == szx_nameset_init`、`fnv1a == rarx_fnv1a == szx_fnv1a`、
+  `remove_tree == szx_remove_tree`
+- C++ 的 `C1 == C2` / `D1 == D2` 构造析构对（编译器为同一函数生成两个 ABI 入口）：
+  `_ZN10CmdExtractC1EP11CommandData == ...C2...`、`_ZN4FileD1Ev == _ZN4FileD2Ev` 等
+- 只读常量表：`Sbox == _ZL1S`（AES 表在 `rijndael.cpp` 与 `Aes.c` 各一份）、
+  `SHA256_K_ARRAY == _ZL1K`、`PPMD7_kExpEscape == _ZL9ExpEscape`
+- RARDLL 模式下被置空的 UI 函数、`mz_stream_read_int64 == read_uint64`、
+  libunwind 的 `__unw_* == unw_*`、`__unw_resume == unw_resume`
+
+**风险提示**：`--icf=all` 是 LLD 的激进模式，**不做地址敏感性检查**
+（`--icf=safe` 才会读 `.llvm_addrsig` 跳过被取地址的函数）。逐组核对下来这 76 组
+都是同码副本、没有"比较函数/常量表地址"的用法 —— 但这是人工判断，不是编译器给的
+保证。想绝对保守就把 `--icf=all` 换成 `--icf=safe`，代价是少省几 KB。
+
+复现脚本：`.build/_whatremoved_v192.sh`（一次跑完三个变体 + 全部核对）。

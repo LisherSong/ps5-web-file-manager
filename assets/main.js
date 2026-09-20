@@ -39,7 +39,7 @@ let L = {};
 // /api/version, which reports the build's VERSION_TAG -- see loadVersion().
 // Keeping a literal here used to be the only source, and it inevitably
 // drifted (the footer said "v1.9" throughout the v1.9.1 release).
-const APP_VERSION_FALLBACK = "v1.9.1";
+const APP_VERSION_FALLBACK = "v1.9.2";
 const LAST_PATH_KEY = "ps5-web-file-mgr:last-path";
 const SORT_KEY = "ps5-web-file-mgr:list-sort";
 const LOADING_DISPLAY_DELAY = 250;

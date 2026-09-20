@@ -4,7 +4,19 @@ All notable changes to **PS5 Web File Manager** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> Release artifact for v1.9.1:
+> Release artifact for v1.9.2:
+> `web-file-mgr-v1.9.2.elf` — size 870 488 bytes (~850 KiB)
+> sha256 `177e90fecf93a0251e83f67884fba4551051be248330b0d70fda8ea732f88e84`
+> ELF class 64, little-endian, e_machine `0x003e` (x86_64-sie-ps5)
+>
+> Behaviourally identical to the published v1.9.1 binary — the only source
+> delta is the version literal itself (`VERSION_TAG` in the Makefile, plus the
+> UI footer fallback in `assets/main.js`). The build is reproducible: reverting
+> those two literals and rebuilding reproduces the v1.9.1 ELF byte for byte, so
+> nothing else differs. See [v1.9.2] below for why the version moved at all.
+>
+> Release artifact for v1.9.1 (superseded — the tag pointed four commits behind
+> the tree that actually produced this binary):
 > `web-file-mgr-v1.9.1.elf` — size 870 488 bytes (~850 KiB)
 > sha256 `24392aff6ddcca4dc0ea969cce356bd693ac52efe8a117d61ee1c814aa43cd07`
 > ELF class 64, little-endian, e_machine `0x003e` (x86_64-sie-ps5)
