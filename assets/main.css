@@ -286,28 +286,6 @@ body {
   border-top: 7px solid #f2f5f7;
 }
 
-.split-menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 40;
-  display: none;
-  min-width: 150px;
-  padding-top: 6px;
-}
-
-.split-menu button {
-  width: 100%;
-  min-width: 150px;
-  margin: 0;
-  white-space: nowrap;
-}
-
-.split-button:hover .split-menu,
-.split-button.open .split-menu {
-  display: block;
-}
-
 button,
 .button {
   height: 54px;
@@ -1057,6 +1035,38 @@ input[type="checkbox"] {
   margin-left: 14px;
 }
 
+/* Shown while a file drag hovers the window. pointer-events stays off so the
+   drop still lands on the window listener rather than on this element, and the
+   z-index sits above the task overlay so the hint is visible during a running
+   task (the drop itself is ignored while busy). */
+.drop-upload-overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 19000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 11, 14, .88);
+  box-shadow: inset 0 0 0 4px #6fb1ff;
+  pointer-events: none;
+}
+
+.drop-upload-message {
+  max-width: calc(100% - 48px);
+  padding: 26px 34px;
+  border: 1px solid #46515f;
+  border-radius: 8px;
+  background: #1b2026;
+  box-shadow: 0 18px 54px rgba(0, 0, 0, .5);
+  color: #edf0f2;
+  font-size: 24px;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .task-overlay {
   position: fixed;
   top: 0;
@@ -1347,15 +1357,6 @@ input[type="checkbox"] {
   .split-button .split-arrow {
     min-width: 34px;
     width: 34px;
-  }
-
-  .split-menu {
-    min-width: 126px;
-    padding-top: 4px;
-  }
-
-  .split-menu button {
-    min-width: 126px;
   }
 
   .paste-action {

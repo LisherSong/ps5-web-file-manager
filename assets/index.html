@@ -54,13 +54,9 @@
       </div>
       <div class="tool-right">
         <button id="refreshBtn" data-i18n="refresh"></button>
-        <div id="uploadMenu" class="split-button remote-only">
+        <div id="uploadGroup" class="split-button remote-only">
           <button id="uploadBtn" class="split-main" data-i18n="upload"></button>
-          <button id="uploadMenuBtn" class="split-arrow" type="button" aria-label="Upload menu"></button>
-          <div class="split-menu">
-            <button id="uploadFolderBtn" type="button" data-i18n="uploadFolder"></button>
-            <button id="uploadAndExtractBtn" type="button" data-i18n="extractUpload"></button>
-          </div>
+          <button id="uploadFolderBtn" class="split-arrow" type="button" aria-label="Upload folder"></button>
         </div>
         <button id="newTextBtn" data-i18n="newText"></button>
         <button id="mkdirBtn" data-i18n="mkdir"></button>
@@ -68,7 +64,6 @@
     </section>
     <input id="uploadFiles" type="file" multiple hidden>
     <input id="uploadFolder" type="file" multiple webkitdirectory hidden>
-    <input id="uploadZip" type="file" accept=".zip,.rar,application/zip,application/x-zip-compressed,application/vnd.rar,application/x-rar-compressed" hidden>
 
     <section id="content" class="content">
       <table>
@@ -184,6 +179,10 @@
         <button id="permissionApplyBtn" class="primary" data-i18n="apply"></button>
       </div>
     </section>
+  </div>
+
+  <div id="dropUploadOverlay" class="drop-upload-overlay remote-only" hidden>
+    <div class="drop-upload-message" data-i18n="dropUpload"></div>
   </div>
 
   <div id="taskOverlay" class="task-overlay" hidden>

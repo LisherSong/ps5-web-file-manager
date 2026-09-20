@@ -72,14 +72,11 @@ const installPkgBtn = document.getElementById("installPkgBtn");
 const extractBtn = document.getElementById("extractBtn");
 const clearClipboardBtn = document.getElementById("clearClipboardBtn");
 const downloadBtn = document.getElementById("downloadBtn");
-const uploadMenuEl = document.getElementById("uploadMenu");
 const uploadBtn = document.getElementById("uploadBtn");
-const uploadMenuBtn = document.getElementById("uploadMenuBtn");
 const uploadFolderBtn = document.getElementById("uploadFolderBtn");
-const uploadAndExtractBtn = document.getElementById("uploadAndExtractBtn");
 const uploadFilesEl = document.getElementById("uploadFiles");
 const uploadFolderEl = document.getElementById("uploadFolder");
-const uploadZipEl = document.getElementById("uploadZip");
+const dropUploadOverlayEl = document.getElementById("dropUploadOverlay");
 const initLoadingEl = document.getElementById("initLoading");
 const exitBtn = document.getElementById("exitBtn");
 const textEditorOverlayEl = document.getElementById("textEditorOverlay");
@@ -182,6 +179,8 @@ function applyStaticText() {
   }
   exitBtn.title = t("exit");
   exitBtn.setAttribute("aria-label", t("exit"));
+  uploadFolderBtn.title = t("uploadFolder");
+  uploadFolderBtn.setAttribute("aria-label", t("uploadFolder"));
   parentBtn.title = t("parent");
   parentBtn.setAttribute("aria-label", t("parent"));
   versionEl.textContent = APP_VERSION_FALLBACK;
@@ -820,6 +819,14 @@ function isExtractableArchive(item) {
   if (isSevenZipArchive(item)) return true;
   if (isSevenZipSplitVolume(item)) return true;
   return false;
+}
+
+// The upload path knows a filename but has no directory entry to inspect, so
+// reuse the toolbar's archive test on a synthetic item. Keeps a dropped
+// .7z.001 or .part1.rar recognised as "offer to extract" without duplicating
+// the rules.
+function isExtractableName(name) {
+  return isExtractableArchive({ type: "-", name: String(name || "") });
 }
 
 function isSpecialDirectory(item) {
@@ -1462,9 +1469,7 @@ function updateButtons() {
   downloadBtn.disabled = locked || items.length === 0;
   document.getElementById("refreshBtn").disabled = locked;
   uploadBtn.disabled = locked;
-  uploadMenuBtn.disabled = locked;
   uploadFolderBtn.disabled = locked;
-  uploadAndExtractBtn.disabled = locked;
   document.getElementById("mkdirBtn").disabled = locked;
   newTextBtn.disabled = locked;
   for (const button of filesEl.querySelectorAll(".row-action, .mode-action")) button.disabled = locked;
@@ -2031,7 +2036,6 @@ function renderTasks(tasks) {
   const isDelete = task.op === "delete";
   const isDownload = task.op === "download";
   const isChmod = task.op === "chmod";
-  const isExtract = task.op === "extract";
   const isPreparing = (task.op === "copy" || task.op === "move" || isChmod) &&
     task.state === "running" && done === 0;
   const isFinishing = !isDelete && !isDownload && task.state === "running" && total > 0 && done >= total;
@@ -2064,9 +2068,15 @@ function renderTasks(tasks) {
   speedItem.textContent = t("speedLabel") + ": " + (isChmod ?
     t("itemsPerSecond", { count: Math.round(speed) }) : formatSpeed(speed));
   const progressItem = document.createElement("div");
-  progressItem.textContent = t("progressLabel") + ": " + (isExtract && Number(task.entries_total) ?
-    t("extractProgress", { done: Number(task.entries_done || 0), total: Number(task.entries_total || 0) }) :
-    isChmod ? t("permissionProgress", { done, total }) : formatSize(done) + " / " + formatSize(total));
+  // Bytes only, for every task type including extract. An entry counter was
+  // tried here and read as a hang: the archives that matter are a handful of
+  // huge entries (a game blob split across volumes), so entries_done sits at 0
+  // for the whole of the first one while bytes are plainly moving. The current
+  // file name is already shown on its own line, so the entry index added
+  // nothing a user could act on. Benchmarked: reporting is not a cost -- see
+  // tests/bench_progress.c --mode -- so this is about clarity, not speed.
+  progressItem.textContent = t("progressLabel") + ": " + (isChmod ?
+    t("permissionProgress", { done, total }) : formatSize(done) + " / " + formatSize(total));
   const etaItem = document.createElement("div");
   etaItem.textContent = t("etaLabel") + ": " + averageEta(task, done, total);
   appendChildren(meta, speedItem, progressItem, etaItem);
@@ -2289,7 +2299,7 @@ function uploadFileRequest(taskId, file, rel, overwrite, index) {
   });
 }
 
-async function uploadFiles(files) {
+async function uploadFiles(files, relativeNames) {
   if (busy || loadingPath || !files.length) return;
   const useLoading = files.length >= SELECT_ALL_LOADING_THRESHOLD;
   let list;
@@ -2306,13 +2316,26 @@ async function uploadFiles(files) {
     list = Array.prototype.slice.call(files);
     for (let i = 0; i < list.length; i++) {
       const file = list[i];
-      rels.push(uploadRelativeName(file));
+      // Dropped items carry no webkitRelativePath, so the drop collector
+      // rebuilds the path itself and passes it in.
+      rels.push(relativeNames && relativeNames[i] ? relativeNames[i] : uploadRelativeName(file));
       sizes.push(String(file.size || 0));
       total += Number(file.size || 0);
     }
     conflicts = uploadConflicts(rels);
   } finally {
     if (useLoading) hideContentLoading();
+  }
+
+  // A lone archive used to need the "upload and extract" menu entry. Ask once
+  // here instead, so the plain Upload button covers it too; declining is an
+  // ordinary upload, and the toolbar Extract button still works afterwards.
+  if (list.length === 1 && isExtractableName(rels[0])) {
+    uploadFilesEl.value = "";
+    uploadFolderEl.value = "";
+    if (confirm(t("extractUploadAsk", { name: rels[0] }))) {
+      return uploadAndExtractFile(list[0], rels[0], true);
+    }
   }
 
   const overwrite = conflicts.length &&
@@ -2374,38 +2397,133 @@ async function uploadFiles(files) {
   }
 }
 
+// Two one-click entries rather than a menu: the main button picks files, the
+// arrow picks a folder. A native file dialog is either file-only or
+// folder-only (webkitdirectory), so a single dialog cannot offer both; the
+// drop target below is the one gesture that accepts either.
 function actionUploadFiles() {
   if (busy || loadingPath) return;
-  uploadMenuEl.classList.remove("open");
   uploadFilesEl.click();
 }
 
 function actionUploadFolder() {
   if (busy || loadingPath) return;
-  uploadMenuEl.classList.remove("open");
   uploadFolderEl.click();
 }
 
-function toggleUploadMenu() {
-  if (busy || loadingPath) return;
-  uploadMenuEl.classList.toggle("open");
+// A dropped directory arrives as a FileSystemEntry, which has no recursive
+// listing of its own: readEntries() hands back one batch at a time and an
+// empty batch marks the end, so it has to be driven until it drains.
+async function readDroppedDirectory(directory) {
+  const reader = directory.createReader();
+  const out = [];
+  for (;;) {
+    const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+    if (!batch.length) return out;
+    for (const entry of batch) out.push(entry);
+  }
 }
 
-function actionUploadAndExtract() {
-  if (busy || loadingPath) return;
-  uploadMenuEl.classList.remove("open");
-  uploadZipEl.click();
+async function collectDroppedEntry(entry, prefix, files, relativeNames) {
+  if (entry.isFile) {
+    const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+    files.push(file);
+    relativeNames.push(prefix + file.name);
+    return;
+  }
+  if (!entry.isDirectory) return;
+  const children = await readDroppedDirectory(entry);
+  const childPrefix = prefix + entry.name + "/";
+  for (const child of children) {
+    await collectDroppedEntry(child, childPrefix, files, relativeNames);
+  }
 }
 
-async function uploadAndExtractFile(file) {
+async function uploadDroppedItems(dataTransfer) {
+  const files = [];
+  const relativeNames = [];
+  const dirEntries = [];
+  const items = dataTransfer.items;
+  if (items && items.length) {
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].kind !== "file") continue;
+      const entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
+      if (entry) {
+        dirEntries.push(entry);
+        continue;
+      }
+      const file = items[i].getAsFile();
+      if (file) {
+        files.push(file);
+        relativeNames.push(file.name);
+      }
+    }
+  } else {
+    for (let i = 0; i < dataTransfer.files.length; i++) {
+      const file = dataTransfer.files[i];
+      files.push(file);
+      relativeNames.push(uploadRelativeName(file));
+    }
+  }
+  for (const entry of dirEntries) {
+    await collectDroppedEntry(entry, "", files, relativeNames);
+  }
+  await uploadFiles(files, relativeNames);
+}
+
+function dataTransferHasFiles(dataTransfer) {
+  const types = dataTransfer && dataTransfer.types;
+  if (!types) return false;
+  for (let i = 0; i < types.length; i++) {
+    if (types[i] === "Files") return true;
+  }
+  return false;
+}
+
+function setupDropUpload() {
+  // The console browser has no drag source of its own, so the listeners would
+  // only ever raise a hint that nothing can dismiss.
+  if (isPlayStationBrowser()) return;
+  let dragDepth = 0;
+  window.addEventListener("dragenter", event => {
+    if (!dataTransferHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    dragDepth++;
+    if (!busy && !loadingPath) dropUploadOverlayEl.hidden = false;
+  });
+  window.addEventListener("dragover", event => {
+    if (!dataTransferHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  });
+  window.addEventListener("dragleave", () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) dropUploadOverlayEl.hidden = true;
+  });
+  window.addEventListener("drop", event => {
+    if (!dataTransferHasFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    dragDepth = 0;
+    dropUploadOverlayEl.hidden = true;
+    if (busy || loadingPath) return;
+    uploadDroppedItems(event.dataTransfer).catch(err => {
+      const message = t("uploadFailed", { error: err.message || t("backendError") });
+      setStatus(message);
+      alert(message);
+    });
+  });
+}
+
+async function uploadAndExtractFile(file, relativeName, alreadyAsked) {
   if (busy || loadingPath) return;
-  if (!/\.(zip|rar)$/i.test(file.name || "")) {
+  if (!isExtractableName(relativeName || file.name || "")) {
     alert(t("err_extract_unsupported", { arg: file.name }));
     return;
   }
-  const rel = uploadRelativeName(file);
+  const rel = relativeName || uploadRelativeName(file);
   const zipPath = pathJoin(cwd, rel);
-  if (!confirm(t("extractUploadConfirm", { name: rel, path: displayPath(cwd) }))) return;
+  if (!alreadyAsked &&
+      !confirm(t("extractUploadConfirm", { name: rel, path: displayPath(cwd) }))) return;
   const conflict = confirm(t("extractOverwriteAsk")) ? "overwrite" : "fail";
 
   let taskId = 0;
@@ -2452,7 +2570,6 @@ async function uploadAndExtractFile(file) {
     }
   } finally {
     uploadXhr = null;
-    uploadZipEl.value = "";
     if (!trackedTask) setBusy(false);
   }
 }
@@ -2485,15 +2602,10 @@ document.getElementById("renameBtn").addEventListener("click", actionRename);
 downloadBtn.addEventListener("click", actionDownload);
 document.getElementById("deleteBtn").addEventListener("click", actionDelete);
 uploadBtn.addEventListener("click", actionUploadFiles);
-uploadMenuBtn.addEventListener("click", toggleUploadMenu);
 uploadFolderBtn.addEventListener("click", actionUploadFolder);
-uploadAndExtractBtn.addEventListener("click", actionUploadAndExtract);
 uploadFilesEl.addEventListener("change", () => uploadFiles(uploadFilesEl.files));
 uploadFolderEl.addEventListener("change", () => uploadFiles(uploadFolderEl.files));
-uploadZipEl.addEventListener("change", () => {
-  if (uploadZipEl.files.length === 1) uploadAndExtractFile(uploadZipEl.files[0]);
-  else uploadZipEl.value = "";
-});
+setupDropUpload();
 exitBtn.addEventListener("click", actionExit);
 parentBtn.addEventListener("click", actionParentDirectory);
 textEditorCloseBtn.addEventListener("click", requestCloseTextEditor);
@@ -2541,10 +2653,6 @@ window.addEventListener("popstate", event => {
     const revealPath = parentPath(cwd) === path ? cwd : "";
     loadAndReveal(path, false, false, true, null, revealPath);
   }
-});
-document.addEventListener("click", event => {
-  if (!uploadMenuEl || uploadMenuEl.contains(event.target)) return;
-  uploadMenuEl.classList.remove("open");
 });
 document.querySelector("thead").addEventListener("click", event => {
   if (busy || loadingPath) return;
