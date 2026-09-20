@@ -15,7 +15,7 @@
 | 解压引擎 | ZIP / RAR / 7z × 单卷/分卷（6 组合）+ 7zAES / RAR 加密 |
 | 主机测试 | **ZIP 108 + RAR 27 + 7z 28 = 163 checks，0 失败**（MinGW gcc 16.2.0） |
 | PS5 构建 | ✅ WSL prospero-clang 18.1.8，一键脚本可复现 |
-| ELF 产物 | `web-file-mgr-v1.9.1.elf` · 1,017,864 B · sha256 `05952ac05fb937e8758846cbd8d495a427670e3cfb7f4020d42d4c6fe8c21631` · e_machine=0x003e |
+| ELF 产物 | `web-file-mgr-v1.9.1.elf` · 870,488 B · sha256 `24392aff6ddcca4dc0ea969cce356bd693ac52efe8a117d61ee1c814aa43cd07` · e_machine=0x003e（2026-09-20 瘦身后；瘦身前 1,017,864 B，见 `docs/SIZE-OPTIMIZATION.md`） |
 | GitHub | `main` 已推到 `1fa2f09`；`0d036a7` 待推；`v1.9.1` tag 待重打 |
 | 唯一功能缺口 | 7z `-mhe=on`（加密头） |
 

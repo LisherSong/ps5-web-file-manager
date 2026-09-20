@@ -4,6 +4,19 @@ All notable changes to **PS5 Web File Manager** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> Release artifact for v1.9.1:
+> `web-file-mgr-v1.9.1.elf` — size 870 488 bytes (~850 KiB)
+> sha256 `24392aff6ddcca4dc0ea969cce356bd693ac52efe8a117d61ee1c814aa43cd07`
+> ELF class 64, little-endian, e_machine `0x003e` (x86_64-sie-ps5)
+>
+> Built on the 7z-complete tree: LZMA SDK decode subset + self-written codec
+> chain, 7zAES, and ZIP/RAR/7z volume support. Build-system-only delta vs the
+> first v1.9.1 artifact (1 017 864 B): `src/demangle_stub.c` keeps libc++abi's
+> Itanium name demangler (105 KiB, only reachable from the uncaught-exception
+> path) out of the link, and `-Wl,--icf=all` folds identical functions.
+> −15.8% overall with no change to functionality or decompression throughput.
+> See `docs/SIZE-OPTIMIZATION.md`.
+>
 > Release artifact for v1.9:
 > `web-file-mgr.elf` — size 919 440 bytes (~897 KiB)
 > sha256 `bb8f17e9addc6a9984f611503ca01b51f8984b773d353630da1f25bd1a28a997`

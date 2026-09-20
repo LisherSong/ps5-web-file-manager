@@ -30,7 +30,7 @@ HOST_PKG_CONFIG ?= pkg-config
 # and you can tell at a glance which ELF is on the USB stick.
 BIN        := web-file-mgr-$(VERSION_TAG).elf
 LINUX_BIN  := web-file-mgr-linux-$(VERSION_TAG)
-COMMON_SRCS := src/main.c src/websrv.c src/filemgr.c src/file_response.c src/task.c src/upload.c src/download.c src/text.c src/list.c src/space.c src/version.c src/fs_util.c src/json_util.c src/path_util.c src/asset.c src/mime.c src/notify.c src/pkg_installer.c src/pkg_info.c src/extract.c src/zip_extract.c src/rar_extract.c src/zipx_volume.c src/zipx_volstream.c src/zipx_common.c src/sevenz_extract.c src/sevenz_chain.c src/sevenz_volstream.c src/sevenz_mt.c
+COMMON_SRCS := src/main.c src/websrv.c src/filemgr.c src/file_response.c src/task.c src/upload.c src/download.c src/text.c src/list.c src/space.c src/version.c src/fs_util.c src/json_util.c src/path_util.c src/asset.c src/mime.c src/notify.c src/pkg_installer.c src/pkg_info.c src/extract.c src/zip_extract.c src/rar_extract.c src/zipx_volume.c src/zipx_volstream.c src/zipx_common.c src/sevenz_extract.c src/sevenz_chain.c src/sevenz_volstream.c src/sevenz_mt.c src/demangle_stub.c
 PS5_SRCS    := $(COMMON_SRCS) src/app_installer.c src/cpu_support_stub.c
 LINUX_SRCS  := $(COMMON_SRCS)
 BASE_ASSETS := $(filter-out %.dds,$(wildcard assets/*))
@@ -123,7 +123,11 @@ LINUX_TP_OBJS := $(patsubst %.c,linux-obj/%.o,$(THIRD_PARTY_C_SRCS)) \
 
 CFLAGS := -Oz -fno-asynchronous-unwind-tables -fno-unwind-tables -Wall -Werror -ffunction-sections -fdata-sections -Isrc -Ithird_party/minizip-ng/include -Ithird_party/unrar7 -Ithird_party/7z -DVERSION_TAG=\"$(VERSION_TAG)\" -DTITLE_ID=\"$(TITLE_ID)\"
 CFLAGS += `$(PKG_CONFIG) libmicrohttpd --cflags`
-LDFLAGS := -Wl,--gc-sections
+# --icf=all: fold byte-identical functions. LLD-only (GNU ld's --icf is
+# incomplete), so it stays on the PS5 line -- the linux target never uses
+# LDFLAGS. Paired with src/demangle_stub.c this takes the ELF from ~1010 to
+# ~850 KiB; see docs/SIZE-OPTIMIZATION.md.
+LDFLAGS := -Wl,--gc-sections -Wl,--icf=all
 LDADD  := `$(PKG_CONFIG) libmicrohttpd --libs`
 LDADD  += -lSceIpmi -lSceAppInstUtil -lSceUserService
 LINUX_CFLAGS := -O2 -flto -Wall -Werror -Isrc -Ithird_party/minizip-ng/include -Ithird_party/unrar7 -Ithird_party/7z -DVERSION_TAG=\"$(VERSION_TAG)\" -DTITLE_ID=\"$(TITLE_ID)\"
