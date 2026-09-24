@@ -4,7 +4,8 @@ All notable changes to **PS5 Web File Manager** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> Release artifact for v1.9.3M — **built and verified locally, not published yet**:
+> Release artifact for v1.9.3M — **published** (<https://github.com/LisherSong/ps5-web-file-manager/releases/tag/v1.9.3M>),
+> after end-to-end validation on a real console:
 > `web-file-mgr-v1.9.3M.elf` — size 903 448 bytes (~882 KiB)
 > sha256 `8ca47d5aaca75085b32641300cce30fadb7df7749cb6b53d04f129bcecc286b7`
 > ELF class 64, little-endian, e_machine `0x003e` (x86_64-sie-ps5)
@@ -21,9 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (`versionTooltip`, en + zh). This is the first release using the convention;
 > the older entries below keep their original plain numbers.
 >
-> This is the first binary to carry the encrypted-archive work and the
-> dictionary-reporting fix (`[v1.9.3M]` below). It exists for on-device testing:
-> the GitHub release is still v1.9.2 and its binary contains none of it.
+> This is the first **published** binary to carry the encrypted-archive work and
+> the dictionary-reporting fix (`[v1.9.3M]` below). It was validated end to end
+> on a real console before release; the acceptance checklist that was run is
+> `docs/DEVICE-TEST-v1.9.3M.md`. The previous release, v1.9.2, contains none of
+> this work.
 >
 > Its size is **unchanged yet again** (903 448 B) although the content grew, for
 > the sixth build in a row. Every round of this release has only moved
@@ -108,7 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > (`Makefile` CFLAGS `-Ithird_party/unrar`, `src/extract.c` forward
 > declaration of `extract_progress`); no vendored or engine changes.
 
-## [v1.9.3M] — 2026-09-23
+## [v1.9.3M] — 2026-09-24
 
 **Encrypted archives now extract end to end — ZIP (both schemes), RAR, and 7z
 with an encrypted header.**

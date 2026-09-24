@@ -6,7 +6,7 @@
 
 > Homebrew HTTP file manager for jailbroken PS5 consoles. Browse, edit, upload, download and extract ZIPs through any browser on the same network — single self-contained ELF payload, no external services, no telemetry.
 
-**Version:** v1.9.2 · **Title ID:** `FMGR88888` · **License:** GPLv3+ · **Target:** `x86_64-sie-ps5`
+**Version:** v1.9.3M · **Title ID:** `FMGR88888` · **License:** GPLv3+ · **Target:** `x86_64-sie-ps5`
 
 ---
 
@@ -16,7 +16,7 @@ A payload ELF that runs an HTTP file manager inside a jailbroken PS5. Open `http
 
 The same source tree builds a Linux binary for development and a PS5 payload ELF for deployment — see `make linux` below.
 
-## What's new (unreleased)
+## What's new in v1.9.3M
 
 - **Encrypted ZIP extraction works end to end** — both schemes:
   - traditional PKWARE ("ZipCrypto", what `zip -e` writes), and
@@ -108,11 +108,11 @@ The same source tree builds a Linux binary for development and a PS5 payload ELF
   file name all carry it at once, and the UI footer spells it out on hover. The
   file name changing also means a fork build can no longer shadow an upstream
   artifact of the same upstream version. See Credits.
-- Still open: end-to-end validation of the built ELF on a real console.
+- Validated end to end on a real console before release.
 
-> This section describes **unreleased** work: the published release is still
-> `v1.9.2` and its binary does **not** contain any of it. The unreleased tree
-> identifies itself as `v1.9.3M`.
+> This section describes **v1.9.3M**, which is released:
+> <https://github.com/LisherSong/ps5-web-file-manager/releases/tag/v1.9.3M>.
+> The previous release, `v1.9.2`, contains none of it.
 
 ## What's new in v1.9.2
 
