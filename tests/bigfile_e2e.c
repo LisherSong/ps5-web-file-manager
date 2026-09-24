@@ -24,7 +24,7 @@ main(int argc, char **argv) {
   }
   st = zipx_extract(argv[1], argv[2], ZIPX_CONFLICT_FAIL,
                     zipx_limits_profile(ZIPX_LIMITS_LARGE),
-                    NULL, NULL, NULL, &res);
+                    NULL, NULL, NULL, NULL, &res);
   printf("status=%d (%s)\n", (int)st, zipx_status_string(st));
   printf("sys_errno=%d entries=%llu/%llu files=%llu dirs=%llu\n",
          res.sys_errno, (unsigned long long)res.entries_done,

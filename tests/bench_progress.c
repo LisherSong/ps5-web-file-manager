@@ -140,11 +140,11 @@ main(int argc, char **argv) {
 
   if(!strcmp(format, "rar")) {
     status = rar_extract(archive, out_dir, ZIPX_CONFLICT_OVERWRITE,
-                         zipx_default_limits(), NULL, on_report, NULL,
+                         zipx_default_limits(), NULL, on_report, NULL, NULL,
                          &result);
   } else if(!strcmp(format, "zip")) {
     status = zipx_extract(archive, out_dir, ZIPX_CONFLICT_OVERWRITE,
-                          zipx_default_limits(), NULL, on_report, NULL,
+                          zipx_default_limits(), NULL, on_report, NULL, NULL,
                           &result);
   } else {
     status = sevenz_extract(archive, out_dir, ZIPX_CONFLICT_OVERWRITE,

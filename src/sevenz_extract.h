@@ -14,8 +14,9 @@
    Backend notes (LZMA SDK 26.03 + src/sevenz_chain.c):
      * Copy / LZMA / LZMA2 / PPMd, the Delta filter and the x86 / PPC / IA64 /
        ARM / ARMT / SPARC branch converters, BCJ2, and 7zAES.
-     * An encrypted *header* (`-mhe=on`) is not readable: the SDK refuses it
-       before any folder is known, and we report exactly that.
+     * An encrypted *header* (`-mhe=on`) is decrypted by src/sevenz_header.c
+       first: the SDK refuses such an archive before any folder is known, so
+       the header has to be readable before the SDK is asked to read it.
 */
 
 #include "zip_extract.h"

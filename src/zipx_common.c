@@ -89,6 +89,7 @@ zipx_status_string(zipx_status_t status) {
   case ZIPX_ERR_LIMIT_RATIO: return "compression ratio too high";
   case ZIPX_ERR_LIMIT_DEPTH: return "path too deep";
   case ZIPX_ERR_LIMIT_NAME: return "path too long";
+  case ZIPX_ERR_LIMIT_DICT: return "dictionary too large";
   case ZIPX_ERR_CONFLICT: return "target already exists";
   case ZIPX_ERR_PASSWORD: return "password required or wrong";
   case ZIPX_ERR_SPACE: return "not enough space";

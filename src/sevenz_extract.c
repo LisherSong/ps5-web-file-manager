@@ -37,6 +37,7 @@
 #include "7zFile.h"
 
 #include "sevenz_chain.h"
+#include "sevenz_header.h"
 #include "sevenz_mt.h"
 #include "sevenz_volstream.h"
 
@@ -1619,6 +1620,9 @@ sevenz_extract(const char *sevenz_path, const char *dst_dir,
   int dst_existed = 0;
   int status;
   static int tables_ready;
+  szh_prep *hdr_prep = NULL;
+  ISeekInStream *hdr_stream = NULL;
+  char hdr_msg[256] = "";
 
   if(!result || !sevenz_path || !sevenz_path[0] || !dst_dir || !dst_dir[0]) {
     if(result) {
@@ -1686,8 +1690,49 @@ sevenz_extract(const char *sevenz_path, const char *dst_dir,
   }
   look_stream.buf = look_buf;
   look_stream.bufSize = SZX_INPUT_BUF_SIZE;
-  look_stream.realStream = sevenz_volstream_stream(vol);
+
+  /* An encrypted header (-mhe=on) hides the whole folder table, so it has to be
+     decrypted before the SDK can read anything at all.  szh_prepare() reports
+     SZH_PLAIN for every other archive, and then the SDK sees exactly the stream
+     it always did. */
+  hdr_stream = sevenz_volstream_stream(vol);
+  switch(szh_prepare(&hdr_prep, hdr_stream, c->password, hdr_msg,
+                     sizeof(hdr_msg))) {
+  case SZH_PATCHED:
+    hdr_stream = szh_stream(hdr_prep);
+    break;
+  case SZH_PLAIN:
+    break;
+  case SZH_ERR_PASSWORD:
+    status = szx_fail(c, ZIPX_ERR_PASSWORD, sevenz_path, "%s: %s", vol_desc,
+                      hdr_msg);
+    goto done;
+  case SZH_ERR_UNSUPPORTED:
+    status = szx_fail(c, ZIPX_ERR_UNSUPPORTED, sevenz_path, "%s: %s", vol_desc,
+                      hdr_msg);
+    goto done;
+  case SZH_ERR_IO:
+    status = szx_fail(c, ZIPX_ERR_IO, sevenz_path, "%s: %s", vol_desc, hdr_msg);
+    goto done;
+  default:
+    status = szx_fail(c, ZIPX_ERR_FORMAT, sevenz_path, "%s: %s", vol_desc,
+                      hdr_msg);
+    goto done;
+  }
+  look_stream.realStream = hdr_stream;
   LookToRead2_INIT(&look_stream);
+  {
+    /* Inspecting the start header moved the stream around, and LookToRead2
+       reads from wherever it finds the stream on its first call -- it does not
+       seek.  Put it back at byte 0. */
+    Int64 zero = 0;
+
+    if(hdr_stream->Seek(hdr_stream, &zero, SZ_SEEK_SET) != SZ_OK) {
+      status = szx_fail(c, ZIPX_ERR_IO, sevenz_path, "%s: seek failed",
+                        vol_desc);
+      goto done;
+    }
+  }
 
   SzArEx_Init(&db);
   res = SzArEx_Open(&db, &look_stream.vt, &g_sz_alloc, &g_sz_alloc);
@@ -1695,8 +1740,8 @@ sevenz_extract(const char *sevenz_path, const char *dst_dir,
     /* SzArEx_Open already released everything it allocated. */
     if(res == SZ_ERROR_UNSUPPORTED) {
       status = szx_fail(c, ZIPX_ERR_UNSUPPORTED, sevenz_path,
-                        "%s: the archive header is encrypted (-mhe=on); only "
-                        "archives whose header is readable can be unpacked",
+                        "%s: the archive header is compressed with a method the "
+                        "bundled decoder does not have",
                         vol_desc);
     } else {
       status = szx_fail(c, ZIPX_ERR_FORMAT, sevenz_path,
@@ -1772,6 +1817,7 @@ done:
   if(look_buf) {
     ISzAlloc_Free(&g_sz_alloc, look_buf);
   }
+  szh_prep_free(hdr_prep);
   sevenz_volstream_free(vol);
   szx_cleanup_staging(c);
   result->entries_total = c->entries_total;

@@ -1,3 +1,23 @@
+/* PKG preview -- the /api/pkg_info and /api/pkg_icon endpoints.
+ *
+ * Independent C99 implementation of the PS5 .pkg container layout (entry table
+ * + PARAM.SFO + param.json + ICON0), written for this project.
+ *
+ * NOT derived from cy33hc/ps5-ezremote-client, which the README credits for the
+ * same feature. That project is GPL-2.0-only -- its sources carry no "or later"
+ * notice -- and therefore cannot be combined with this GPL-3.0 codebase at all.
+ * The two share nothing but the on-disk format facts: the SFO magic
+ * 0x46535000, the 20-byte header / 16-byte entry layout, and the key/value
+ * offset indirection. Those are dictated by the format and no implementation
+ * can avoid them. Everything else differs -- this file is C where that one is
+ * C++, it parses the .pkg entry table and param.json (upstream has no .pkg
+ * parser), and it tokenizes JSON itself (upstream links json-c).
+ *
+ * Provenance record and the line-by-line comparison: docs/REWRITE-FEASIBILITY.md
+ * section 2.2. Revisit that note if this file is ever rewritten or the upstream
+ * licence wording changes.
+ */
+
 #include "pkg_info.h"
 
 #include <errno.h>

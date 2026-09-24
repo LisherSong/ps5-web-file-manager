@@ -17,6 +17,14 @@
 
 set -uo pipefail
 
+# Git Bash / MSYS2 rewrites anything that looks like a POSIX path before the
+# argument reaches wsl.exe, so `/mnt/c/...` becomes
+# `<msys-root>/mnt/c/...` and the WSL side reports "cannot stat" (this is how
+# the script first failed under PortableGit). WSL sees Linux paths, so the
+# translation must be off for the whole script. Harmless on a real Linux shell.
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL='*'
+
 REPO='/c/Users/songl/Desktop/Web File Manager/ps5-web-file-manager'
 WSL_DISTRO='Ubuntu-22.04'
 WSL_DIR='/home/song/ps5-web-file-manager/.build'

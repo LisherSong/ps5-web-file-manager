@@ -13,7 +13,7 @@
 |---|---|
 | 上游真的没有许可吗？ | **否。上游是 GPL-3.0**，我们自己也是 GPL-3.0，两者一致 |
 | 现在能合法发布吗？ | **能**。GPL-3.0 允许修改和再分发，只需满足归因 + 源码可得 |
-| 有没有真实风险？ | 有 4 个，全部**可在 1 天内修完**，没有一个需要重写 |
+| 有没有真实风险？ | 原本 5 个，**4 个已于 2026-09-23 关闭、第 5 个经确认接受现状**（见 §2）；**从头到尾没有一个需要重写** |
 | 全量重写要多少人日？ | **35–50 人日**（约 1.4–2 万行需重写，第三方 7.1 万行可直接复用） |
 | 值得重写吗？ | **取决于目标**：想闭源/商用 → 必须重写；想开源分享 → **完全不必** |
 
@@ -57,11 +57,11 @@ LisherSong/ps5-web-file-manager (GPL-3.0)  ← 本项目
 
 | # | 风险 | 严重度 | 具体位置 | 修法 | 成本 |
 |---|---|---|---|---|---|
-| 1 | **归因缺失**：README Credits 列了 8 个项目，唯独漏了 `owendswang`；git 历史被重写成 "Initial import"，上游作者署名在历史里也找不到 | 🟡 中 | `README.md:436-451` | Credits 加一行 + 补 `NOTICE` 文件 | 1 小时 |
-| 2 | **unRAR 与 GPL-3.0 的附加限制冲突**：UnRAR 许可禁止"用于开发 RAR 兼容压缩器"，GPL-3.0 §7 禁止附加限制，严格讲不兼容 | 🟡 中 | `third_party/unrar7/` | 见 §2.1 | 0（接受）或 移除 RAR |
-| 3 | **ezremote 是 GPLv2**：README 只写 "GPLv2"，未标 "or later"。GPLv2-only 与 GPL-3.0 **不兼容** | 🟡 中 | `src/pkg_info.c`（PKG 预览） | 确认其许可措辞；若 v2-only 则重写该模块（591 行） | 1 天 |
-| 4 | **二进制分发需提供源码**（GPL §6） | 🟢 低 | Release 里的 ELF | 仓库已公开，Release notes 附仓库链接即可 | 10 分钟 |
-| 5 | Title ID `FMGR88888` 与上游相同，可能与他人 payload 冲突 | 🟢 低 | `Makefile:20` | 换一个自定义 ID | 5 分钟 |
+| 1 | ~~**归因缺失**~~ → **已修正（2026-09-23）**：README Credits 已补上 `owendswang` 与 rarlab UnRAR / opello 镜像、并把已删除的 `third_party/unrar/` 从 Credits 里清理掉；`THIRD_PARTY_NOTICES` 本就正确。**残留**：git 历史里的 `5cb0b76 Initial import` 无法追溯上游提交 | 🟡 中 → 🟢 低 | `README.md` Credits | 历史归属只能在 Release 说明与 Credits 里声明；如需彻底重建历史得重写仓库 | 已完成 |
+| 2 | **unRAR 与 GPL-3.0 的附加限制冲突**：UnRAR 许可禁止"用于开发 RAR 兼容压缩器"，GPL-3.0 §7 禁止附加限制，严格讲不兼容 | 🟡 中 | `third_party/unrar7/` | 见 §2.1 | 0（接受） |
+| 3 | ~~**ezremote 是 GPLv2**：README 只写 "GPLv2"，未标 "or later"。GPLv2-only 与 GPL-3.0 **不兼容**~~ → **已定性并关闭（2026-09-23）**：确为 **GPL-2.0-only**，但逐行比对确认**我们未取其代码** | ✅ 已关闭 | `src/pkg_info.c`（PKG 预览） | 无需重写；README 中英措辞已改准，代码加了来源注记 —— 见 §2.2 | 0 |
+| 4 | ~~**二进制分发需提供源码**（GPL §6）~~ → **已补（2026-09-23）**：v1.9.2 Release 说明的 License 段原先只链了**上游**仓库，未链本仓库 | ✅ 已关闭 | Release 里的 ELF | 已用 `gh release edit` 加入 "Corresponding source for this binary" 段（资产未动、仍非 draft/pre、仍是 latest）；今后发版沿用 `.build/release-notes-*.md` 模板 | 0 |
+| 5 | Title ID `FMGR88888` 与上游相同，可能与他人 payload 冲突 | 🟢 低 | `Makefile:21` | ~~换一个自定义 ID~~ → **2026-09-23 决定维持现状（用户确认）**。核对结论：`TITLE_ID` 只出现在两处 —— `src/app_installer.c:86`（PKG 安装目标目录 `/user/app/<TITLE_ID>`）和 `src/version.c:31`（`/api/version` 上报），**与解压 / 上传 / 浏览功能无关**，且本项目是上游 fork 的直接替代者（同 ID 便于覆盖安装）。代价：与上游 payload **不能共存**，同时装会撞目录 | 0（接受） |
 
 ### 2.1 关于 unRAR（风险 2 详解）
 
@@ -76,6 +76,64 @@ UnRAR 许可原文允许"在任何软件中处理 RAR 归档"，但**禁止用�
 | C. 换实现 | 找自由许可的 RAR 解码器 | **市面上不存在可用的**，死路 |
 
 **建议 A**。风险等级实际很低：你只做解压不做压缩，本来就不触碰被禁止的那一条。
+
+### 2.2 关于 ezremote（风险 3 详解，2026-09-23 结案）
+
+**结论：风险不成立 —— 确为 `GPL-2.0-only`，但我们一行代码都没取。**
+
+#### 第一步：许可措辞（用 `gh api` 查上游，不是猜）
+
+```
+gh api repos/cy33hc/ps5-ezremote-client    → license.spdx_id = "GPL-2.0"
+gh api .../contents/LICENSE                → GNU GPL v2 全文（June 1991）
+gh api .../contents/source/actions.cpp     → 无任何版权 / GPL 声明头
+gh api .../contents/source/clients/*.h     → 同上，一个声明头都没有
+```
+
+上游**全部源文件都不带许可声明**，唯一的许可陈述就是那份 GPLv2 全文。
+GPLv2 的 "or later" 只能由版权人**明示**授予（LICENSE 全文本身不含该授予），
+所以按其自身现状应认定为 **`GPL-2.0-only`**。
+
+这一点很关键：**`GPL-2.0-only` 与 GPL-3.0 不兼容**（这正是 FSF 发明
+"GPLv2 or later" 惯例的原因）。所以「到底抄没抄」不是学术问题 ——
+抄了就必须重写这个模块。
+
+#### 第二步：逐行比对（决定性的一步）
+
+上游与 PKG 相关的**只有一个文件**：`source/sfo.cpp`（4,209 B / 141 行 / C++）。
+上游**没有 `.pkg` 容器解析器** —— tree 里的 `Ps5_ezRemote_Client_2.00.pkg`
+是一个已编译的 payload（10 MB），不是源码。
+
+| 维度 | 上游 `sfo.cpp` | 我们的 `src/pkg_info.c` |
+|---|---|---|
+| 语言 | C++（`reinterpret_cast` / `std::map` / `namespace SFO`） | **C99** |
+| 函数分解 | 三个独立函数 `GetString` / `GetParams` / `GetParamsFromParamJson` | 单个 `append_sfo_fields(strbuf_t *, ...)` 直接流式产出 JSON 片段 |
+| 返回值 | `std::map<std::string,std::string>` | 写进 `strbuf_t`，无中间容器 |
+| JSON | 依赖 **json-c**（`json_tokener_parse` / `json_object_object_get`） | **自写分词器**（`parse_json_tokens()` / `json_object_value()`，在 `json_util.c`） |
+| 越界防护 | 仅两处 `size <` 检查，其余裸指针 + `reinterpret_cast` | 逐项校验（`count > SFO_ENTRY_MAX`、`index_end > size`、`key_offset < index_end`、`memchr` 找 NUL、`read_le32` 定长读） |
+| 覆盖范围 | 只有 SFO + param.json | 另有 **`.pkg` 条目表**（`PKG_CNT_MAGIC` / FIH / LIH / 条目类型 `0x1000` / `0x1200` / `0x121f` / `0x2000`）、本地化图标选择、两个 HTTP 端点 |
+
+**唯一重合的是格式事实**：SFO magic `0x46535000`、20 字节头 / 16 字节条目、
+`keyofs`+`nameofs` 与 `valofs`+`dataofs` 的间接寻址。这些是 PS5 文件格式的客观规定，
+也是解析它的**唯一办法**（等同合并原则），不构成可保护的表达。
+
+⇒ **不存在代码衍生关系**，`src/pkg_info.c` 无需重写。
+
+#### 第三步：已落地的处置
+
+1. `README.md` / `README.zh-CN.md` 的 Credits 条目：由 "Preview PKG info. License: GPLv2"
+   改为明确写出 **GPL-2.0-only、与本项目不兼容、未取其代码**，并指向本节 ——
+   后来人不会再把它当成"我们的依赖"去理解授权链。
+2. `src/pkg_info.c` 文件头补了来源注记（含比对理由与本节指引）。
+   **纯注释，不改变编译产物** —— 已确认 `src/` 内没有 `__LINE__` / `__FILE__` 依赖，
+   注释被预处理器丢弃后目标文件逐字节相同。
+3. 本节即为 provenance 留档。
+
+> 适用范围：这套「先查许可措辞 → 再做逐行比对 → 最后把结论写进代码注记」的流程，
+> 对任何「README 里 credits 了某个项目」的情形都适用。因为 README 的 Credits 段落里
+> 混着两类东西：**真正 vendored 的代码**（minizip-ng / zlib / UnRAR）和
+> **只是参考了思路的项目**（websrv / ftpsrv / zftpd / etaHEN / ezremote）。
+> 两者在授权义务上完全不同，但排版把它们放在同一张列表里 —— 这就是这个疑问的由来。
 
 ---
 
@@ -123,7 +181,7 @@ v1.7 之后**新建**的文件（6,745 行），逐个检查其依赖：
 
 | 项 | 内容 |
 |---|---|
-| 做什么 | README 补 owendswang 署名、加 NOTICE、确认 ezremote 许可、Release 附源码链接、换 Title ID |
+| 做什么 | README 补 owendswang 署名、加 NOTICE、确认 ezremote 许可、Release 附源码链接、换 Title ID（→ 末项已于 2026-09-23 决定维持现状，见风险 5） |
 | 成本 | **0.5–1 人日** |
 | 收益 | 合规闭环，零功能损失，保留全部现有能力 |
 | 风险 | 无 |
@@ -182,7 +240,7 @@ v1.7 之后**新建**的文件（6,745 行），逐个检查其依赖：
 | 4 | `main.js` 2,652 行单文件，无模块拆分 | `assets/main.js` | 按 view / api / task 拆模块 |
 | 5 | `filemgr.c` 2,458 行，路由 + 业务逻辑 + 平台调用混在一起 | `src/filemgr.c` | 分 handler / service / platform 三层 |
 | 6 | 测试靠手工脚本，未接入 `make test` | `tests/` | 接 CI，覆盖率可量化 |
-| 7 | 唯一功能缺口：7z `-mhe=on` 加密头 | `sevenz_extract.c` | 重写时一并补上（工作量约翻倍于现有 7z 头解析） |
+| 7 | ~~唯一功能缺口：7z `-mhe=on` 加密头~~ **已闭合**（2026-09-23，`src/sevenz_header.c`） | `sevenz_extract.c` | 无剩余格式缺口；重写时该项可删 |
 
 ---
 
@@ -206,8 +264,11 @@ v1.7 之后**新建**的文件（6,745 行），逐个检查其依赖：
    + zipx_volstream.{c,h} 抽成独立仓库，MIT 授权，主项目作为 submodule 引用。
    → 3,661 行成果立刻获得独立身份，且证明这部分是你的原创。
 
-3. 确认 ezremote 是 "GPLv2" 还是 "GPLv2 or later"；
-   若是 v2-only，重写 pkg_info.c（591 行）或改用别的数据源。
+3. ~~确认 ezremote 是 "GPLv2" 还是 "GPLv2 or later"；若是 v2-only，重写 pkg_info.c~~
+   → **已结案（2026-09-23）**：是 `GPL-2.0-only`，但逐行比对确认**我们未取其代码**，
+   **无需重写**。比对记录与处置见 §2.2。
+4. ~~v1.9.2 Release 说明补本仓库链接（GPL §6 源码提供义务）~~
+   → **已补（2026-09-23）**，见风险 4 行。
 ```
 
 ### 6.3 需要你回答的问题

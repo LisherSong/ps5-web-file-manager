@@ -20,6 +20,16 @@ web-file-mgr-linux
 # Generated 7z fixtures (tests/make_sevenz_fixtures.py rebuilds them).
 tests/fixtures-7z/
 
+# Staging trees the fixture generators copy from (make-rar-fixtures.bat uses
+# fixture-stage, make-zip-enc-fixtures.bat uses fixture-stage-zip). The
+# archives they produce under tests/fixtures-real/ ARE committed.
+tests/fixture-stage/
+tests/fixture-stage-zip/
+
+# Python bytecode (the fixture generators and bench_driver are hand-run)
+__pycache__/
+*.pyc
+
 # Editor / OS noise
 .vscode/
 .idea/

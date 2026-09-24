@@ -207,6 +207,9 @@ LDFLAGS += -Wl,-z,pack-relative-relocs
 `aeshe` 仍是已知的 `-mhe=on` 缺口。README / CHANGELOG / HANDOVER / 论坛帖里的
 产物指纹已同步为 870,488 B · sha256 `177e90fe…8e84`。
 
+> 后续（2026-09-23）：测试计数已变为 ZIP 140 + RAR 37 = 177（7z 套件 27 用例），
+> `aeshe` 缺口也已闭合；产物指纹随之更新。本节保留的是上面的历史测量值。
+
 ---
 
 ## 附录 A：v1.9.2 产物一致性验证（2026-09-20）

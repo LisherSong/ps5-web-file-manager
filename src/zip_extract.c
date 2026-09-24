@@ -49,6 +49,11 @@ typedef struct {
   zipx_cancel_fn cancel;
   zipx_progress_fn progress;
   void *userdata;
+  /* NULL or empty means "no password supplied". Both ZIP encryption schemes
+     (traditional PKWARE and WinZip AES) only need it for the entry data: the
+     central directory is never encrypted, so the scan phase can read every
+     header without it. */
+  const char *password;
   zipx_result_t *result;
   uint64_t entries_total;
   uint64_t entries_done;
@@ -604,8 +609,16 @@ scan_archive(void *zip, zipx_ctx_t *c) {
       break;
     }
     if((info->flag & MZ_ZIP_FLAG_ENCRYPTED) || info->aes_version) {
-      ret = ctx_fail(c, ZIPX_ERR_UNSUPPORTED, name, "encrypted entry");
-      break;
+      /* Encrypted entries are readable, but only with a password. The
+         password itself is verified when the entry data is opened -- for
+         ZipCrypto against the 1-2 byte header check, for WinZip AES against
+         the 2 byte PBKDF2 verifier -- so a wrong password surfaces as
+         ZIPX_ERR_PASSWORD from the extract phase rather than here. */
+      if(!c->password) {
+        ret = ctx_fail(c, ZIPX_ERR_PASSWORD, name,
+                       "entry is encrypted and no password was given");
+        break;
+      }
     }
     if(info->compression_method != MZ_COMPRESS_METHOD_STORE &&
        info->compression_method != MZ_COMPRESS_METHOD_DEFLATE) {
@@ -841,10 +854,21 @@ write_entry(void *zip, zipx_ctx_t *c, int root_fd, const char *name,
     return -1;
   }
 
-  if(mz_zip_entry_read_open(zip, 0, NULL) != MZ_OK) {
-    ctx_fail(c, ZIPX_ERR_FORMAT, name, "cannot read entry data");
-    ret = -1;
-    goto done;
+  {
+    /* Opening the entry data is also where a supplied password is checked:
+       mz_strm_pkcrypt.c compares the decrypted header byte(s) and
+       mz_strm_wzaes.c the 2 byte PBKDF2 verifier, both returning
+       MZ_PASSWORD_ERROR on a mismatch. */
+    int err = mz_zip_entry_read_open(zip, 0, c->password);
+
+    if(err != MZ_OK) {
+      ctx_fail(c, err == MZ_PASSWORD_ERROR ? ZIPX_ERR_PASSWORD : ZIPX_ERR_FORMAT,
+               name, "%s",
+               err == MZ_PASSWORD_ERROR ? "the password is wrong"
+                                        : "cannot read entry data");
+      ret = -1;
+      goto done;
+    }
   }
 
   while(ret == 0) {
@@ -1247,7 +1271,7 @@ zipx_status_t
 zipx_extract(const char *zip_path, const char *dst_dir,
              zipx_conflict_t conflict, const zipx_limits_t *limits,
              zipx_cancel_fn cancel, zipx_progress_fn progress,
-             void *userdata, zipx_result_t *result) {
+             void *userdata, const char *password, zipx_result_t *result) {
   zipx_ctx_t ctx;
   zipx_ctx_t *c = &ctx;
   char parent[ZIPX_PATH_MAX];
@@ -1280,6 +1304,7 @@ zipx_extract(const char *zip_path, const char *dst_dir,
   c->cancel = cancel;
   c->progress = progress;
   c->userdata = userdata;
+  c->password = (password && password[0]) ? password : NULL;
 
   snprintf(dst_copy, sizeof(dst_copy), "%s", dst_dir);
   {

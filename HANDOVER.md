@@ -1,10 +1,10 @@
 # 交接文档 — ps5-web-file-manager 工作进度
 
-> 交接时间：2026-09-20 · 分支 `main` · 最新提交 **`807d129`** · tag **`v1.9.2`** 已重打到产出发布二进制的提交（此前 `v1.9.1` 落后 4 个提交，tag 与产物对不上）
+> 交接时间：2026-09-23 · 分支 `main` · 最新提交仍是 **`3f80eb4`**（tag `v1.9.2`）——**本轮加密改动全部尚未提交**
 >
 > **主线（用户 2026-09-12 指令）**：「先从 zip 分卷开始吧，然后把六种组合打齐，并把密码通道补齐，注意一些报错信息提示的时候尽量详细准确」
-> **状态：主线全部闭合。** 六种组合（ZIP/RAR/7z × 单卷/分卷）+ 密码通道（RAR 加密 + 7zAES）+ 报错详细信息，全部落地、测试全绿、PS5 ELF 构建成功。
-> **剩余**：① PS5 真机端到端验证（**唯一还没过的关卡**）；② `-mhe=on` 加密头（唯一功能缺口）。
+> **状态：主线全部闭合，且格式面已无已知缺口。** 六种组合（ZIP/RAR/7z × 单卷/分卷）+ 密码通道（ZIP ZipCrypto/AES + RAR `-p`/`-hp` + 7zAES **含 `-mhe=on` 加密头**）+ 报错详细信息，全部落地、测试全绿、PS5 ELF 构建成功。
+> **剩余**：① PS5 真机端到端验证（**唯一还没过的关卡**）；② 版本号仍是 `v1.9.2`，本轮改动处于「未发布」状态——发版需先升 `VERSION_TAG` 与 `APP_VERSION_FALLBACK`。
 
 ---
 
@@ -12,12 +12,13 @@
 
 | 维度 | 状态 |
 |---|---|
-| 解压引擎 | ZIP / RAR / 7z × 单卷/分卷（6 组合）+ 7zAES / RAR 加密 |
-| 主机测试 | **ZIP 108 + RAR 27 + 7z 28 = 163 checks，0 失败**（MinGW gcc；2026-09-20 在 v1.9.2 树上复跑） |
+| 解压引擎 | ZIP / RAR / 7z × 单卷/分卷（6 组合）+ 三种加密（ZIP ZipCrypto/WinZipAES、RAR `-p`/`-hp`、7zAES 与 `-mhe=on` 加密头）全部打通 |
+| 主机测试 | **ZIP 140 + RAR 37 = 177 checks，0 失败**（MinGW gcc；2026-09-23 复跑）+ 7z 套件 **27 用例 0 失败**（`KNOWN_GAPS` 已清空）+ 前端重试流程 27 checks（`.build/ui_retry_test.mjs`） |
 | PS5 构建 | ✅ WSL prospero-clang 18.1.8，一键脚本可复现；构建已实测**确定性**（同源两次构建 sha256 相同） |
-| ELF 产物 | `web-file-mgr-v1.9.2.elf` · 870,488 B · sha256 `177e90fecf93a0251e83f67884fba4551051be248330b0d70fda8ea732f88e84` · e_machine=0x003e（2026-09-20 瘦身后；瘦身前 1,017,864 B，见 `docs/SIZE-OPTIMIZATION.md`） |
-| GitHub | `main`（`807d129`）与 tag `v1.9.2` 均已推送；Release `v1.9.2` 资产为该 ELF |
-| 唯一功能缺口 | 7z `-mhe=on`（加密头） |
+| ELF 产物（工作树，未提交） | `web-file-mgr-v1.9.3M.elf` · 903,448 B · sha256 `8ca47d5aaca75085b32641300cce30fadb7df7749cb6b53d04f129bcecc286b7` · e_machine=0x003e（2026-09-24 最后一轮：上传菜单 + 拖拽提示 + 口令重试改按键 id + 错误文案编码修复 + 菜单行高亮的层叠修复 + 解压按钮常显置灰；**未发布**） |
+| 已发布产物 | `web-file-mgr-v1.9.2.elf` · 870,488 B · sha256 `177e90fecf93a0251e83f67884fba4551051be248330b0d70fda8ea732f88e84`（不含加密改动） |
+| GitHub | `main`（`3f80eb4`）与 tag `v1.9.2` 均已推送；Release `v1.9.2` 资产对应上一行；本轮改动尚未 commit |
+| 已知功能缺口 | **无**（`-mhe=on` 已于 2026-09-23 补齐） |
 
 ### 发布命令（v1.9.2）
 
@@ -67,11 +68,19 @@ bash /home/song/build.sh
 现在收敛到 `Makefile` 一处：
 
 ```make
-VERSION_TAG ?= v1.9.2            # 可用 make VERSION_TAG=v1.9.3 临时覆盖
+VERSION_TAG ?= v1.9.3M           # 可用 make VERSION_TAG=v1.9.3 临时覆盖
 BIN        := web-file-mgr-$(VERSION_TAG).elf
 ```
 
 改这一行会同时影响 **四处**：ELF 内嵌版本串、PS5 启动通知、输出文件名、UI 右下角。
+
+**尾部 `M` = 改版标记（Modified，LisherSong 维护）**，从 v1.9.3M 起启用。上游
+owendswang 的发布版是纯 `vX.Y.Z`，故「带 M = 本仓、不带 = 上游」一眼可分。它刻意
+挂在 `VERSION_TAG` 上而不是做一个只管显示的独立常量：这样 `/api/version`、启动通知、
+stdout 横幅、UI 右下角、ELF 文件名**五处一次性全覆盖**，不可能只在其中一处漏掉。
+附带好处是产物名不再可能与上游同版本号的资产撞车（此前已撞过两次：本地
+`web-file-mgr-v1.9.2.elf` 与线上同名资产并存；`-DVERSION_TAG=v1.9.1` 的残留产物
+和已发布的 870 488 B 文件尺寸相同）。
 
 | 提交 | 内容 |
 |---|---|
@@ -102,17 +111,20 @@ v1.9.2 就是这两处一起改的。
 
 | # | 引擎 | 单卷 | 分卷 | 密码 |
 |---|---|---|---|---|
-| ① | ZIP | ✅ | ✅ 三种命名约定 | ✅ |
-| ② | RAR | ✅ | ✅（vendor unrar 7.20.1） | ✅ `RARSetPassword` |
-| ③ | 7z | ✅ | ✅ `.7z.001` | ✅ 7zAES |
+| ① | ZIP | ✅ | ✅ 三种命名约定 | ✅ ZipCrypto + WinZip AES-128/192/256（2026-09-23 打通，此前 `mz_zip.c` 的加密分支没有后端可调） |
+| ② | RAR | ✅ | ✅（vendor unrar 7.20.1） | ✅ `RARSetPassword`（`-p` 与 `-hp` 头加密；2026-09-23 接线，此前从未被调用） |
+| ③ | 7z | ✅ | ✅ `.7z.001` | ✅ 7zAES（v1.9 起就有）+ `-mhe=on` 加密头（2026-09-23 打通，见 §八） |
 
 ### 3.2 测试
 
 ```bash
 export PATH="/c/mingw64/bin:/c/Users/songl/.workbuddy/binaries/PortableGit/versions/1.2.0/mingw64/bin:/c/Users/songl/.workbuddy/binaries/python/versions/3.13.12:/usr/bin:/bin:/c/Windows/System32:/c/Windows"
 cd "/c/Users/songl/Desktop/Web File Manager/ps5-web-file-manager"
-/usr/bin/bash tests/run-tests.sh          # ZIP 108 + RAR 27
-/usr/bin/bash tests/run-sevenz-tests.sh   # 7z 28（含 KNOWN_GAPS 检查）
+/usr/bin/bash tests/run-tests.sh          # ZIP 140 + RAR 37 = 177
+/usr/bin/bash tests/run-sevenz-tests.sh   # 7z 27（KNOWN_GAPS 已清空）
+
+# 前端「密码失败后重试」流程（桩 DOM，无需浏览器）
+"/c/Users/songl/.workbuddy/binaries/node/versions/22.22.2-3/node.exe" .build/ui_retry_test.mjs   # 27
 ```
 
 ⚠️ **绝不写裸 `bash`** —— 可能解析到 `C:\Windows\System32\bash.exe`（WSL 启动器），脚本跑进 Linux，gcc/python 全变 Linux 版，报莫名错误。必须 `/usr/bin/bash`。
@@ -163,7 +175,7 @@ strings -a web-file-mgr-v1.9.2.elf | grep -m1 '^v1\.'
 LZMA SDK 26.03（public domain，已 vendor 到 `third_party/7z/`，解码子集 60 文件）有两个硬限制，**实测复现过**：
 
 1. **`CSzFolder` 上限 4 coder / 3 bond** —— 7-Zip 默认 `-m0=bcj2` 链 = BCJ2 + 4×LZMA2 = 5 coder，`SzAr_DecodeFolder()` 返回 `SZ_ERROR_UNSUPPORTED`。注意 `SzArEx_Open()` 用的是另一套宽松扫描器（`k_Scan_NumCoders_MAX 64`），所以**文件列表和解压尺寸仍然全对**，失败只在解压时按条目暴露
-2. **C 解码器完全没有 7zAES coder** —— `-p` 与 `-mhe=on` 全被拒
+2. **C 解码器完全没有 7zAES coder** —— 所以 SDK 自己既解不了加密内容，也解不了加密头。内容侧由我们的 `sevenz_chain.c` 承担；**头部**侧由 `sevenz_header.c` 承担（见 §八）
 
 → 因此引擎**自解析 folder blob + 自己驱动 codec 链**（`src/sevenz_chain.c/.h`，pull pipeline：`node_pull(n, dst, want, &got)`，不够就 `node_refill()` 拉上游）。
 
@@ -199,7 +211,7 @@ LZMA SDK 26.03（public domain，已 vendor 到 `third_party/7z/`，解码子集
 
 ### 5.5 提取门面
 
-`src/sevenz_extract.c`（1753 行）完全仿 `zip_extract.c` / `rar_extract.c`：scan → extract(staging, 每 entry fsync) → publish(整 rename) → cleanup。
+`src/sevenz_extract.c`（1753 行）完全仿 `zip_extract.c` / `rar_extract.c`：scan → extract(staging，**不 fsync**） → publish(整 rename) → cleanup。
 
 - **OVERWRITE 与 MERGE 对目录-目录碰撞都递归下钻**（仅叶子文件不同）
 - 三方共用 `src/zipx_common.c`（限额 profile + `zipx_status_string()`）
@@ -241,29 +253,76 @@ LZMA SDK 26.03（public domain，已 vendor 到 `third_party/7z/`，解码子集
 
 ---
 
-## 八、唯一功能缺口
+## 八、7z `-mhe=on` 加密头（2026-09-23 已闭合）
 
-### `-mhe=on` 加密头 7z
+**它为什么难**：`-mhe=on` 时整个 header 也是一条独立的 7z 流——归档末尾的下一头部区域以 `k7zIdEncodedHeader`（0x17）开头，后接一段 StreamsInfo，描述「一个 folder，其输出就是真正的 header」。而 vendored SDK 的 **C 解码器没有 7zAES coder**，`SzArEx_Open2()` 走到 `SzAr_DecodeFolder()` 就返回 `SZ_ERROR_UNSUPPORTED`，于是**连文件列表都读不出来**（文件名、folder 表、每个条目的尺寸全在那份加密头里）。
 
-`-mhe=on` 时整个 header（含 folder 表）也被加密，引擎必须在**解析 folder 之前**先用密码解密第二份 header，才能知道有哪些 folder / 用什么 coder。工作量约为标准 7zAES 的 2 倍（两次 AES 解密路径）。
+**做法**（`src/sevenz_header.{c,h}`）：
+1. 自己读 32 字节 start header，只探**一个字节**——不是 0x17 就立刻 `SZH_PLAIN` 收工（普通的 `-mhc=on` 压缩头、`-mhc=off` 明文头都走这条，SDK 行为一字不变）。
+2. 是 0x17 就整段读下来（CRC 校验），**最小解析** PackInfo + UnpackInfo：pack 位置/大小、folder 的 coder 描述字节范围、每个 coder 的 unpack size、folder CRC。解析刻意宽容——任何异常一律回落 `SZH_PLAIN`，把诊断权留给 SDK，保证非加密归档的报错一字不改。
+3. 把这份描述喂给 **`sz_chain_parse()` / `sz_chain_decode()`**，也就是内容走的同一条 7zAES 路径，密码规则完全一致：需要密码而没给 → `SZH_ERR_PASSWORD`；解出来 CRC 不对 / 不是 `k7zIdHeader` → 同样是密码错。
+4. 造一个**虚拟 `ISeekInStream`**：`[0,32)` 是改写过的 start header（指向明文头），`[hdr_off, hdr_off+L)` 是解出来的明文头，其余一律透传真实归档。`hdr_off` 就用加密头原本所在的偏移，所以**归档里存的任何一个偏移都不用搬**——SDK 在它预期的位置读到明文头，从明文头推出的 dataPos 依旧指向真实的内容 pack 流。
+5. 交给 `SzArEx_Open()`，之后一切照旧（内容仍由 `sevenz_chain.c` 直接读 `sevenz_volstream`）。
 
-当前 `SZ_ERROR_UNSUPPORTED`，已在 `tests/run-sevenz-tests.sh` 的 `KNOWN_GAPS`（`aeshe`）标注 —— 缺口修好后脚本会主动报错提醒移除。
+**要点/坑**：
+- 明文头比它替换掉的那条记录**长**（实测 aeshe.7z：记录 64 B、明文 462 B），所以虚拟流的 `total` 要取 `max(真实文件长度, hdr_off+L)`，否则 `SzArEx_Open2()` 的 seek-to-END 长度检查会报 `SZ_ERROR_INPUT_EOF`。
+- **`LookToRead2_INIT` 不 seek**，第一次 `Look` 从真实流当前位置读。`szh_prepare()` 会把流移来移去，所以交给 SDK 之前必须显式 seek 回 0（`sevenz_extract.c` 里那一段有注释）。这原本是个隐性依赖。
+- 明文头大小有上限（`SZH_MAX_HEADER` 64 MiB），sink 按需增长、不信头部里声明的 unpack size。
+- 只处理 `numFolders == 1`（SDK 自己对这条记录就传 `numFoldersMax = 1`）与 `external == 0`。
+
+**覆盖**：`tests/fixtures-7z/aeshe.7z`（密码 `Secret123`），`tests/run-sevenz-tests.sh` 的 `KNOWN_GAPS` 已清空——chain 驱动与 façade 两条路径都跑通；`test_sevenz_extract.c --cases` 另验无密码 / 错密码 → `ZIPX_ERR_PASSWORD`、正确密码 → 成功，且失败后不留 staging。
 
 ### 真机端到端待验证
 
 ELF 已构建，但需装 PS5 实测：
 1. ZIP / RAR / 7z 三类**分卷**真机解压
-2. **加密 7z（7zAES）** 真机解压
+2. **加密 7z（7zAES + `-mhe=on` 加密头）** 真机解压（`aeshe.7z` 那类归档在真机上连文件列表都要走新代码）
 3. 160GB / 9.5 万文件大 ZIP
 4. 分卷 RAR 进度条实时走动
-5. UI 右下角版本号显示 `v1.9.2`（`/api/version` 与兜底字面量应一致）
+5. UI 右下角版本号显示（`/api/version` 与兜底字面量应一致）
+
+> **📊 2026-09-23 首个真机性能数据**：解一个 **18 GB 的包**，**11 分钟**、**1252 个条目**
+> （平均 14.7 MB），UI 报 **10–40 MB/s**；**18 GB 是压缩包自身的大小**（✅ 已确认）。
+> **格式 = RAR**（✅ 已确认）；包原本在 **PC 上**，**经插件上传**进 PS5，**上传速度 30–40 MB/s**。
+> 口径是**解压后的字节**（`zip_extract.c:651-678` 累加 `uncompressed_size`，`:900/910` 累加
+> `write()` 写出的解压字节），且是 **250 ms 采样的瞬时值**（`task.c:202-206`，进度只在 ≥1 MiB
+> 时上报）—— 摆动里含采样噪声，**只有「总字节 ÷ 总耗时」可信**。
+> 仍然成立的一条：**per-entry 开销不是主因**（平均 14.7 MB/条目，不是小文件场景）。
+>
+> **⚠️ 2026-09-23 晚 更正：本节原先写的「解码不是瓶颈」已撤回。** 两条理由：
+> ① 它拿「PS5 解 **RAR**」的 28 MiB/s 去比「PC 解 **7z**」的 427 MiB/s —— **不同格式、不同
+> 解码器、不同机器**，量级论证不成立；② 「4× 摆动 = 解码无罪」此前已降级为 250 ms 采样
+> 噪声的弱证据。**原先那句「源盘交付速度 ≈ 28 MiB/s 是硬上界」同样站不住** —— 它是从总耗时
+> 反推的*观测结果*，不是设备能力上限；若解码是瓶颈，源盘恰恰没跑满。
+>
+> **③ 新发现（有据可查、且直接针对真实负载）：RAR 解码在 PS5 上是单线程的。**
+> `third_party/unrar7/os.hpp:43-45` 的 `#define RAR_SMP` 落在 `#ifdef _WIN_ALL` 分支**内**
+> ⇒ POSIX 构建不定义（我们 Makefile 里 0 次出现），而官方 POSIX makefile 第 11 行是
+> `DEFINES=… -DRAR_SMP` —— **我们漏了这个开关**。后果：`unpack50mt.cpp`
+> （`Unpack::Unpack5MT`，rarlab 专门调过的多线程 RAR5 解压器）**没编进来**，
+> `unpack.cpp:185-198` 的 MT 分支整段不参与编译，`SetThreads` / `ThreadPool` 一并消失。
+> ⇒ **首要假设：28 MiB/s ≈ 单线程 RAR5 解码的正常量级**（`18 GB ÷ 660 s` 是**解码输入**速率；
+> 而上传实测证明**写入端**至少能到 30–40 MB/s、**读取通常快于写入** ⇒ 纯存储上限解释不了它）。
+> ⚠️ 自查一条：**用 ELF 符号表查内部符号是无效手段** —— 该 ELF 只有 `.dynsym`（513 项）、
+> **无 `.symtab`**，「零命中」是假象（本次差点据此误判）。结论来自 Makefile 与 `os.hpp`。
+> **下一步**：先在 PC/WSL 上 A/B（`-DRAR_SMP` + `unpack50mt.cpp` + `-pthread`，跑同一批 RAR5
+> fixture 并保证 37 项 RAR 断言全绿），收益显著再上真机；同时真机补两个小事实
+> （**RAR4 还是 RAR5**、**解压后多大**）与 `T_copy`。详见 `docs/EXTRACTION-PERF.md` §六 文首
+> 更正块与 `docs/REAL-CONSOLE-PROFILE.md`。
+>
+> **⇒ 终局（2026-09-23 18:15，用户决定）：这条线不做。** 不做的依据是**当前证据判不了收益**，
+> 而不是没收益：MT 只并行**解码**（worker 只跑 `unpack50mt.cpp:190` 的 `UnpackDecodeThread`），
+> 写盘恒为主线程串行（`UnpWriteBuf()` 只在 `unpack50mt.cpp:283/475/587` 被主线程调用）——
+> 若瓶颈在写路径（真机上传已证明写入端只有 30–40 MB/s），收益退化为 1.0×。要判定必须先做
+> `T_copy`（拿插件自己的 `TASK_COPY` 搬同一份包，`src/filemgr.c:836`），再决定是否值得改构建
+> 并刷机验证；用户选择停在第一步之前。**重开的第一个动作是 `T_copy`，不是改 `-DRAR_SMP`。**
 
 ### 可选项（非阻塞）
 
-- **性能**：实测上游（7-Zip 本体）在 **7z 格式上快 1.9×（单线程）/ 3.4×（8 线程）**；ZIP 无显著差异。差距不在我们的架构（我们比 SDK 自己的 `SzArEx` 路径还快 1.02×）。**已全部落地（2026-09-16）**：①汇编解码器（`LzmaDecOpt.asm`+jwasm，1.26×，无 jwasm 自动退纯 C）②多线程 LZMA2（`Lzma2DecMt`，8 线程，1.37×，线程失败自动降级 chain；BCJ2/加密布局仍走 chain）③ZIP 逐条目 fsync 移除（8000 文件 ≥14×）。7z 现与 7-Zip 单线程打平、ZIP 已压过官方（本机受 Defender 拖累不可比，PS5 无该因素）。RAR 与官方 UnRAR 同速（unrar 自带 `target("aes")` SIMD 已启用，无逐条目 fsync）。完整数据见 `docs/EXTRACTION-PERF.md`，基准工具 `tests/bench_driver.py`
-- fsync 批量化（每 64MB/N 条刷一次）—— 9.5 万文件级可省 20–30 分钟
+- **性能**：**优化前**实测上游（7-Zip 本体）在 7z 格式上快 1.9×（单线程）/ 3.4×（8 线程）；ZIP 无显著差异。差距不在我们的架构（我们比 SDK 自己的 `SzArEx` 路径还快 1.02×）。**已全部落地（2026-09-16）**：①汇编解码器（`LzmaDecOpt.asm`+jwasm，1.26×，无 jwasm 自动退纯 C）②多线程 LZMA2（`Lzma2DecMt`，8 线程，1.37×，线程失败自动降级 chain；BCJ2/加密布局仍走 chain）③ZIP 逐条目 fsync 移除（8000 文件 ≥14×）。7z 现与 7-Zip 单线程打平、ZIP 已压过官方（本机受 Defender 拖累不可比，PS5 无该因素）。RAR 与官方 UnRAR 同速（unrar 自带 `target("aes")` SIMD 已启用，无逐条目 fsync）。完整数据见 `docs/EXTRACTION-PERF.md`，基准工具 `tests/bench_driver.py`。**⚠️ 但「单线程打平 / 8 线程 1.59×」是在最有利的输入形状上测的**：基准归档是 `-m0=lzma2 -ms=on` 的**单文件**（`tests/bench_driver.py:179`），恰好是唯一能让 `sz_chain_lzma2_root()`（`src/sevenz_chain.c:750`，要求 1 coder / 0 bond / 1 pack stream / 纯 LZMA2）生效的形状；真实的**多 folder / BCJ2 / 7zAES** 归档会让 MT 失效、退回单线程 chain —— 所以那个 1.59× **既不是上限也不是下限，方向未知**。剩余优化（CRC 硬件化、MT 扩到 BCJ2、条目级并行、ZIP inflate 换 libdeflate、AES-NI）**全部集中在 7z 多线程这一条线上**，建议**先拿真实归档在真机上 profile 再排序**，别按 PC 上这份数字动手
+- ~~fsync 批量化（每 64MB/N 条刷一次）~~ → **已作废，改为「彻底移除」**（2026-09-16）：实际落地的不是批量刷，而是把 ZIP 引擎的逐条目 fsync 直接删掉（RAR/7z 本来就没有），三引擎统一为「**不 sync、只 rename**」——publish 是纯 rename、也没有续解功能，该 fsync 无收益。8000 文件 fixture：fsync 版 >200 s 未跑完 → 无 fsync **14.5 s（≥14×）**。已知取舍：publish 之后到落盘之间断电，可能出现「文件在但内容不完整」；要补只需在 extract 收尾做**一次**目录/整盘 flush（PS5 是 FreeBSD 系，`syncfs()` 不一定有，`sync()` 是全盘、偏重）。代码现状见 `src/zip_extract.c:937-945`，实测见 `docs/EXTRACTION-PERF.md:18-21`
 - 解压失败保留 staging 支持续解（中等改动）
-- 进度条 % / 文字进度 / ETA 三处口径统一为字节
+- ~~进度条 % / 文字进度 / ETA 三处口径统一为字节~~ → **已完成**（`assets/main.js:2071-2079`，条目计数已移除并注明原因）
 
 ---
 
@@ -286,7 +345,9 @@ ELF 已构建，但需装 PS5 实测：
 
 ## 十、工作区状态
 
-工作树已干净（`git status` 仅剩有意保留的未跟踪文档）。
+⚠️ **2026-09-23：工作树不再干净** —— 本轮加密改动（15 个已修改 + 8 个未跟踪文件）**尚未提交**，见文末「十一、本轮变更」。发版前需要先决定版本号并 commit。
+
+以下为 2026-09-15 的历史清理记录（当时工作树干净，"仅剩有意保留的未跟踪文档"）。
 
 已清理（2026-09-15）：
 
@@ -298,3 +359,185 @@ ELF 已构建，但需装 PS5 实测：
 > ⚠️ **清理这类特殊文件名时**：`SHFileOperationW`（带 `FOF_ALLOWUNDO` 走回收站）对含私用区码位的路径会返回 `ERROR_FILE_NOT_FOUND (2)`，**但动作实际已生效**。删完务必查 `C:\$Recycle.Bin\<SID>\$I*` 记录确认落在回收站（`$I` 存原路径 UTF-16，`$R` 是内容）。本沙箱里 `Add-Type` 与 `rm` 都被拦（后者有 safe-delete 钩子），只能用 Python `ctypes` 调 shell32。
 
 `.build/` 下的探针/调试产物已被 `.gitignore` 白名单覆盖，不再污染 `git status`。
+
+---
+
+## 十一、本轮（2026-09-23）变更：加密通道补齐（未提交）
+
+**目标**：让 ZIP 与 RAR 的加密归档真正可解（7zAES 早已可用）。两者此前都报
+`extract_unsupported`，但**缺口在引擎侧，不在 UI** —— 密码框、`password=` 字段、
+`err_extract_password` 文案从 v1.9 起就已就位。
+
+### 11.1 ZIP：给裁剪过的 minizip-ng 补一个 crypto 后端
+
+`third_party/minizip-ng` 是裁到只读路径的精简副本，`mz_zip.c` 里
+`#ifdef HAVE_WZAES / HAVE_PKCRYPT` 的分支保留着，但**对应的流与 crypto 后端被裁掉了**。
+本轮补回：
+
+| 文件 | 状态 | 说明 |
+|---|---|---|
+| `src/mz_strm_wzaes.{c,h}` | 上游 4.2.2 原样恢复 | WinZip AES 流（方法 99 + `0x9901` 扩展字段） |
+| `src/mz_strm_pkcrypt.{c,h}` | 上游 4.2.2 原样恢复 | 传统 PKWARE / ZipCrypto 流 |
+| `src/mz_crypt_wfm.c` | **新写**（~860 行） | 本地 crypto 后端：SHA-1、HMAC-SHA1、AES-128/192/256 |
+
+后端要点：
+- S-box 与 GF(2^8) log/alog 表**首次使用时推导**，所以不新增 `.rodata` 查表（实测 `.rodata` 仅 +256 B，是字符串）。
+- 随机数直接 `open("/dev/urandom")`，**不要**走 `mz_os_rand()` —— 后者会退回 `rand()`/`srand()`，把两个新符号塞进导入表。最终产物**动态符号零新增**。
+- PBKDF2 复用 vendored 的 `mz_crypt.c`（与上游逐字节一致），没有重写。
+- 非 SHA-1 算法与 AEAD aad 一律返回 `MZ_SUPPORT_ERROR`（本项目只读，不需要）。
+- KAT 先行：写完后先用 FIPS 197 / RFC 3174 / RFC 2202 / RFC 6070 / SP 800-38A
+  向量单独验算（`.build/kat_crypto.c`，24/24），再接线。踩到的三个坑：AES 仿射用 `rol32`
+  应为 `rol8`；GF 乘法 `(uint8_t)(a+b) % 255` 截断，应全程 int；HMAC 的 ipad 必须由
+  **已 XOR 过 0x5c 的 opad** 再推。
+
+### 11.2 RAR：把 `RARSetPassword` 接上
+
+`src/rar_extract.{c,h}`：新增 `password` 形参（`rar_extract()` 为第 8 个参数）。
+调用点是 `RAROpenArchiveEx` 之后、**首次 `RARReadHeaderEx` 之前**——这是解密 `-hp`
+头加密归档的硬性顺序要求（scan 与 extract 两个阶段各自开档，两处都要设）。
+`ERAR_MISSING_PASSWORD` / `ERAR_BAD_PASSWORD` 由 `ZIPX_ERR_UNSUPPORTED` 改映射为
+`ZIPX_ERR_PASSWORD`；`RHDF_ENCRYPTED` 只在**没给密码**时提前拒绝。
+
+### 11.3 前端：密码失败后自动重试（这步不做，功能等于不可达）
+
+原先密码框**只对 7z 弹**（`actionExtract()` 里的 `isSevenZipArchive()` 判断），
+ZIP/RAR 加密归档失败后用户根本没机会输密码。现在 `handleTerminalTask()` 在
+`op === "extract" && error_code === "extract_password"` 时走
+`retryExtractWithPassword()`：
+
+- 记忆原始请求（`extractRetryKey(task.id)` → `{conflict, removeSource, name, large, attempts}`），
+  重试时**保持冲突策略与大文件选配**；
+- **必须按任务 id 记，不能按路径记**（v1.9.3M 后期修正）。路径在传输中被
+  「服务端 JSON 逐字节转义为 `\u00XX`」+「`fs_path_value()` 反向还原成原始字节」这一对
+  转换改了表示 ⇒ **非 ASCII 目录下**「页面手里的路径」≠「任务回报的路径」，按路径查必然
+  落空 ⇒ 口令框永远不弹，用户只看到一个失败框，必须先手动再解压一次。任务 id 由服务端
+  分配、原样回传，不受编码影响；重试时也改用**服务端回报的** `task.src` / `task.dst` 重发。
+  消费即删（重试注册到新 id 下），Map 最多留 8 条（同一时刻只可能有一个活动任务）。
+- 最多 3 次；取消或空输入即放弃，回落到原有失败提示；
+- 7z 保留提前询问（免得白跑一次 scan + folder 解析）。
+
+新增文案 `extractPasswordRetryAsk`（重试：密码不正确）+ `extractPasswordFirstAsk`（首次：
+此压缩包已加密），与提前询问用的 `extractPasswordAsk` 区分 —— 第一次失败时用户还没输过密码，
+再说「密码不正确」就是误导。
+
+错误文案里的条目名必须过 `decodeFsText()`：`backendErrorText()` 原样用了 `error_arg`，
+而服务端把它逐字节转义过 ⇒ 中文/日文条目名在错误框里显示成 `â®…ç§.psd`。列表侧一直有这层
+翻译（`displayName()`），只有错误文案漏了。
+
+同源的编码坑：`pathJoin(服务端回报的目录, 本地文件名)` 把两种表示混进同一个字符串，而
+`fs_path_value()` **只要发现任一个码点 > 0xFF 就整体不修** ⇒ 中文名文件放进中文名目录时
+路径失效。新增 `encodeFsText()`（`decodeFsText()` 的逆）在拼接前把本地名转成同一表示，
+`uploadAndExtractFile()` 与 `actionNewText()` 两处都用它。
+
+无头回归：`.build/ui_retry_test.mjs`（真 `main.js` 载入桩 DOM，40 checks，含「非 ASCII 目录
+必须仍弹口令框」的回归用例）、`.build/ui_upload_menu_test.mjs`（40 checks：i18n 键覆盖、
+菜单接线、样式、高亮规则的层叠作用域，以及**解压按钮不许被隐藏、只许被置灰**）、
+`.build/preview_check.mjs`（无头 Chromium 跑真页面，验菜单开关、页脚布局、**解压按钮的
+显隐/置灰/提示随选区变化**，并**读回三种交互状态下高亮的计算值**；该脚本已改为失败即
+非零退出）。
+
+**菜单行的「选中高亮」曾被两条规则同时破坏**（用户报「选中下面那个高亮效果不对」）：
+① 全局 `button:focus` 的 `outline: 3px + offset 2px` 是按 54px 工具栏按钮设计的，套在 46px
+菜单行上会越过面板 6px 内边距、压住相邻行，且 outline 的圆角半径不随 offset 自适应 ⇒ 视觉上
+成了一个「脱离的框 + 两侧挂着的弧线」；② 面板自己的
+`.upload-menu-list button:hover:not(:disabled)` **从未生效过** —— 它与
+`button:not(.row-action):hover:not(:disabled)` 特异性同为 `(0,3,1)`，而后者在文件里更靠后 ⇒
+后者胜出，于是 hover 是 `#303945`、focus 是 `#2b343e`，**两个高亮两个颜色**，且一行 hover 时
+另一行仍因 focus 亮着 ⇒ 看起来「两行同时被选中」。修法：两条规则都收敛到面板 id
+（`#uploadMenu button:…`，`(1,1,1)` / `(1,2,1)` 稳赢通用规则），行只用填充表示选中，键盘焦点
+提示改为**行内 `inset` 环**（`box-shadow: inset 0 0 0 2px`）—— 画在行内，任何行高都不可能
+越界。**这类坑只有真引擎读计算值才抓得住**，光看源码两条规则都「像是对的」。
+
+**解压按钮改为「常显 + 置灰」**（用户要求「直接显示出来 只不过是灰色的 只有能解压的文件才可以
+点击」）：`index.html` 去掉 `hidden`，`renderExtractButton()` 不再碰 `.hidden`，改成按选区设
+disabled 并给一条说明原因的工具提示（什么都没选 ⇒ 新增 `extractSelectArchive`；只选中子卷 ⇒
+沿用 `extractSelectMainVolume`；选中**多个** ⇒ 新增 `extractOneAtATime`，旧代码这种情况错用了
+「请改选主卷」，文案本身是错的）。🪤 **`button:disabled` 带 `pointer-events: none` ⇒ 禁用按钮
+无法 hover，`title` 永远不弹** —— 必须像既有的 `.parent-nav-button:disabled` 那样把
+`pointer-events` 还回来（点击仍无效，`disabled` 属性本身挡激活）。标签同时从 `extractToCurrent`
+（「解压到当前目录」）换成短词 `extract`（「解压」），与工具栏其他动词一致：**常显按钮不该
+同时又是最宽的那个**（英文下 `Extract to current folder` 会到 107 px）。
+**代价必须实测而不是估**：按钮宽 96 px ⇒ 工具栏换行阈值（zh）1080 → 1190 px、（en）1230 →
+1350 px。`.build/preview_check.mjs` 已把阈值**钉成断言**（1920/1600/1280 必须都是一行），
+并按四种选区验 disabled / opacity / title；该脚本同时从「只打印」改成**失败即非零退出**。
+
+### 11.4 构建坑：编译选项变化必须让目标文件失效（**改 Makefile 前必读**）
+
+`make` **看不见**编译选项变化。加 `-DHAVE_WZAES -DHAVE_PKCRYPT` 后，
+`mz_zip.o` / `mz_crypt.o` 被判定为最新而复用 → 此时已无线程引用新流 →
+`--gc-sections` 把加密代码再丢一次，**链接却报成功**（本次第一次构建的产物与
+已发布 v1.9.2 **逐字节相同**，`readelf` 才发现 `.text` 只长了 336 B）。
+
+修法（取代原先的 `LzmaDec.o` 特例）：把第三方编译选项写进标记文件，
+内容变了才重编。
+
+```make
+PS5_FLAGS_STAMP   := ps5-obj/.third_party_cflags
+LINUX_FLAGS_STAMP := linux-obj/.third_party_cflags
+$(PS5_FLAGS_STAMP): FORCE
+	@printf '%s\n' '$(THIRD_PARTY_C_FLAGS_7Z) $(LZMA_DEC_OPT_FLAG)' > $@.tmp
+	@cmp -s $@.tmp $@ || { mv -f $@.tmp $@; echo '  [cflags] ...'; }
+```
+
+> 诊断手法：拿未 strip 的产物比 `readelf -S` 各段尺寸，而不是看总体积。
+> 改一个字符串常量会重排 `.rodata` 字符串池，字节 diff 会被放大到几万字节，
+> 但段尺寸是守恒的——判断"代码到底有没有变"要看段尺寸 + 助记符序列。
+> 现成脚本：`.build/_seccmp.py`、`.build/_operandcheck.sh`。
+
+### 11.5 产物与验证
+
+| 项 | 值 |
+|---|---|
+| 主机测试 | ZIP 140 + RAR 37 = **177 checks / 0 失败**（`tests/run-tests.sh`） |
+| 前端测试 | **27 checks / 0 失败**（`.build/ui_retry_test.mjs`） |
+| ELF | 870,680 B · sha256 `b1409f5c1bc4b1a39ab337853b956f4807f95c5770dee6eca7a18a62cc08f80e` · e_machine 0x003e（加密轮结束时；`-mhe=on` 之后的产物见 §12.3） |
+| 确定性 | 同一源码树构建两次逐字节一致 |
+| 段变化（vs 已发布 v1.9.2） | `.text` +11,296 · `.bss` +5,120（AES 表） · `.rodata` +256 · 动态符号零新增 |
+| 内嵌资产核验 | ELF 内 gzip 资源中可检出 `retryExtractWithPassword` / `extractPasswordRetryAsk`（普通 `strings` 找不到，要先解 gzip；脚本 `.build/check-elf-gzip.py`） |
+
+**未做（发版前必做）**：未 commit / tag / 发 Release；真机端到端未验。
+版本号**已升**为 `v1.9.3M`（2026-09-24 加改版标记 `M`，见 §2.2）。
+README（中英）、CHANGELOG、本文档已同步为「未发布」状态。
+
+---
+
+## 十二、本轮（2026-09-23）变更：7z `-mhe=on` 加密头（未提交）
+
+**目标**：补上最后一个 7z 格式缺口（设计与坑见 §八）。
+
+### 12.1 新增
+
+| 文件 | 说明 |
+|---|---|
+| `src/sevenz_header.{c,h}` | **新写**（~900 行）。头部读取 + `k7zIdEncodedHeader` 最小解析 + 虚拟 `ISeekInStream` |
+| `Makefile` | `src/sevenz_header.c` 进 `COMMON_SRCS`（PS5 与 linux 共用） |
+| `tests/run-sevenz-tests.sh` | 编 `sevenz_header.o` 进 `ENGINE_OBJS`；`KNOWN_GAPS` 清空；façade 矩阵加入 `aeshe` |
+| `tests/sevenz_chain_e2e.c` | 按与产品相同的顺序接线 `szh_prepare()`（否则 chain 矩阵读不了 `aeshe`） |
+| `tests/test_sevenz_extract.c` | `aeshe` 三例（无密码 / 错密码 → `ZIPX_ERR_PASSWORD`；正确密码 → 成功），另修一处 `snprintf` 截断告警 |
+
+### 12.2 关键设计（细节见 §八）
+
+- 只探**一个字节**：不是 `0x17` 立刻返回 `SZH_PLAIN`，SDK 行为与改动前完全一致（12 个既有 fixture 全部复跑通过）。
+- 解析刻意宽容：PackInfo/UnpackInfo 之外的任何异常都回落 `SZH_PLAIN`，把诊断权留给 SDK。
+- 复用 `sz_chain_parse()` / `sz_chain_decode()`，所以 7zAES 的密码/错误语义与内容侧**完全同源**，不新增第二个 crypto 实现。
+- 虚拟流的 `total` 必须 `max(真实长度, hdr_off + L)`；`LookToRead2_INIT` 不 seek，交回 SDK 前必须显式 seek 到 0。
+
+### 12.3 产物与验证
+
+| 项 | 值 |
+|---|---|
+| 7z 套件 | **27 用例 / 0 失败**，`aeshe` 在 chain 与 façade 两条路径都 `ok`，`KNOWN_GAPS` 为空 |
+| 主机测试（ZIP/RAR 回归） | ZIP 140 + RAR 37 = **177 checks / 0 失败**（无回归） |
+| ELF | 903,448 B · sha256 `8ca47d5aaca75085b32641300cce30fadb7df7749cb6b53d04f129bcecc286b7` · e_machine 0x003e（== 本轮最终产物，见 §12.4） |
+| 确定性 | 同一源码树构建两次 sha256 相同 |
+| 段变化（解压按钮常显 vs 上一轮） | **只有 `.rodata` 变化**：`0x026CC0` → `0x026F00`（+0x240 = 576 B：index.html 去掉 `hidden` 并换短标签、`main.js` 的三条禁用理由、两份语言文件各两条新文案、`.extract-action:disabled` 及其注释）。`.text` 两次均为 `0x087780`、`.data` 均为 `0x00034C` —— 第六次「只改内嵌前端资源」 |
+| 段变化（菜单行高亮修复 vs 上一轮） | **只有 `.rodata` 变化**：`0x026B40` → `0x026CC0`（+0x180 = 384 B，三条收敛后的高亮规则加其注释）。`.text` 两次 readelf 均为 `0x087780` —— 又一次「只改内嵌前端资源、不碰 C 逻辑」的标准形状 |
+| 段变化（本轮前端三项 vs 上一轮） | **只有 `.rodata` 变化**：`0x026A40` → `0x026B40`（+0x100 = 256 B）。`.text` / `.data` / `.eh_frame*` 一字节未变 —— 「只改内嵌前端资源 + 加两条文案」的标准形状 |
+| 段变化（加 `M` 标记 + 修正 `err_extract_unsupported` 文案 vs 加密轮产物） | **只有 `.rodata` 变化**：加 `M` 标记 +0x100（256 B），修正文案再 +0x40（64 B）；`.text` / `.data` / `.bss` / `.eh_frame*` / `.gcc_except_table` **一个字节都没变**。又因 16 KiB 段对齐留有余量，**六次构建的文件总尺寸都是 903,448 B**：尺寸相同**不代表**二进制相同（sha256 逐个不同：`f3164efa…` → `53296d29…` → `7b5ab00c…` → `212107a6…` → `da36834d…` → `cf2c0fcf…` → `8ca47d5a…`） |
+| 段变化（加密轮 vs 其前一轮） | `.text` +4,880 · `.rodata` +640 · `.eh_frame_hdr` +32 · `.eh_frame` +160 —— 正文合计 **+5,712**；其余 **+27,056** 是 `p_align=0x4000` 的两处段对齐填充（LOAD#1 越过 0x8C000 边界）。**段数仍为 20，动态符号零新增（513 → 513）** |
+
+> 判读提示：这次文件涨了 32,768 B，但正文只涨 5,712 B —— 不要按体积下结论。
+> 权威做法是比较**段尺寸**与**动态符号集合**（见 §11.4 的诊断手法）。
+
+**未做（发版前必做）**：未 commit / tag / 发 Release；真机端到端未验。
+版本号已升为 `v1.9.3M`（改版标记 `M` 于 2026-09-24 加入）。

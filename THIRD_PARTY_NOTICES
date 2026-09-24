@@ -64,3 +64,27 @@ notice and this list of conditions are retained. unrar is distributed under
 its own freeware terms. The LZMA SDK (section 4) is in the public domain and
 carries no conditions. See the individual LICENSE / license.txt files in
 each `third_party/` subdirectory for the complete terms.
+
+
+Reference-only projects (NOT vendored)
+--------------------------------------
+
+The README Credits section lists a second class of project: ones this payload
+was *written with reference to*, whose code is not present in this repository
+and which therefore impose no obligations here. Keeping the two classes apart
+matters, because one of them is licence-incompatible with this codebase:
+
+  * websrv, ftpsrv, ps5-payload-manager, ps5-payload-dev/sdk, etaHEN  (GPL-3.0 / 3.0+)
+  * zftpd                                                           (MIT)
+  * libmicrohttpd                                                   (LGPL; linked as the SDK-provided static library)
+  * ezremote                                                        (GPL-2.0-only)
+
+For ezremote specifically: GPL-2.0-only cannot be combined with this project's
+GPL-3.0, so it matters that no code was taken from it. The PKG-preview code in
+`src/pkg_info.c` is an independent implementation -- the two share only the
+on-disk SFO format facts, which no implementation can avoid. Line-by-line
+comparison and reasoning: `docs/REWRITE-FEASIBILITY.md` section 2.2.
+
+`owendswang/ps5-web-file-manager` (GPL-3.0) is not a mere reference: it is the
+fork this project descends from, and the web UI, the task model and the PS5
+packaging all originate there.

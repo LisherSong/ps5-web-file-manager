@@ -24,11 +24,11 @@ CC="${CC:-gcc}"
 
 # Archives the engine cannot read yet.  Each entry needs a reason; when one of
 # them starts passing the script says so, so the list cannot rot.
-KNOWN_GAPS="aeshe"
-#   aeshe       - the header itself is encrypted (-mhe=on).  Reading it means
-#                 decrypting a standalone 7z stream *before* any folder is
-#                 known, i.e. a header parser of our own; the vendored SDK
-#                 refuses with SZ_ERROR_UNSUPPORTED before we are involved.
+#
+# Empty since v1.9.3M: `aeshe` (-mhe=on encrypted header) used to live here.  An
+# encrypted header is now decrypted by src/sevenz_header.c before the SDK sees
+# the folder table, so the last known 7z gap is closed.
+KNOWN_GAPS=""
 
 # Must match PASSWORD in tests/make_sevenz_fixtures.py.
 FIXTURE_PASSWORD="Secret123"
@@ -57,6 +57,9 @@ done
   -I"$SEVENZ_DIR" -I"$ROOT/src" -o "$BUILD/sevenz_volstream.o" \
   "$ROOT/src/sevenz_volstream.c"
 "$CC" -c -O2 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE \
+  -I"$SEVENZ_DIR" -I"$ROOT/src" -o "$BUILD/sevenz_header.o" \
+  "$ROOT/src/sevenz_header.c"
+"$CC" -c -O2 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE \
   -I"$SEVENZ_DIR" -I"$ROOT/src" -o "$BUILD/sevenz_mt.o" "$ROOT/src/sevenz_mt.c"
 "$CC" -c -O2 -Wall -Wextra -Werror -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE \
   -I"$ROOT/src" -o "$BUILD/zipx_volume.o" "$ROOT/src/zipx_volume.c"
@@ -72,9 +75,9 @@ done
   -include "$ROOT/tests/posix_compat.h" \
   -o "$BUILD/sevenz_extract.o" "$ROOT/src/sevenz_extract.c"
 
-ENGINE_OBJS=("$BUILD/sevenz_chain.o" "$BUILD/sevenz_volstream.o"
-             "$BUILD/sevenz_mt.o" "$BUILD/zipx_volume.o"
-             "$BUILD/zipx_common.o")
+ENGINE_OBJS=("$BUILD/sevenz_chain.o" "$BUILD/sevenz_header.o"
+             "$BUILD/sevenz_volstream.o" "$BUILD/sevenz_mt.o"
+             "$BUILD/zipx_volume.o" "$BUILD/zipx_common.o")
 
 FACADE_OBJS=("$BUILD/sevenz_extract.o" "${ENGINE_OBJS[@]}")
 
@@ -177,14 +180,14 @@ fi
 echo
 echo "== 7z extraction facade (engine: src/sevenz_extract.c) =="
 mkdir -p "$BUILD/fx"
-for a in store lzma2 lzma ppmd bcj delta utf8 bcj2 solidoff bcj2off aes; do
+for a in store lzma2 lzma ppmd bcj delta utf8 bcj2 solidoff bcj2off aes aeshe; do
   [ -f "$FIXTURES/$a.7z" ] || continue
   out="$(mktemp -d "$BUILD/fx/XXXXXX")" || continue
   target="$out/$a"
   mkdir -p "$target"
   rc=0
   case "$a" in
-    aes) "$BUILD/test_sevenz_extract" "$FIXTURES/$a.7z" "$target" \
+    aes|aeshe) "$BUILD/test_sevenz_extract" "$FIXTURES/$a.7z" "$target" \
            "$FIXTURE_PASSWORD" >"$out.log" 2>&1 || rc=$? ;;
     *)   "$BUILD/test_sevenz_extract" "$FIXTURES/$a.7z" "$target" \
            >"$out.log" 2>&1 || rc=$? ;;

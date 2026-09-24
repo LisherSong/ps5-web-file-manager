@@ -53,6 +53,12 @@ RAR_BIN = next((p for p in (
 
 # Object lists mirror what tests/run-sevenz-tests.sh and tests/run-tests.sh
 # build; those scripts must have run once before this can link.
+#
+# These lists are the one thing here that can rot: adding a source file to
+# either engine (sevenz_header.c for -mhe=on, mz_crypt_wfm.c plus the two
+# restored minizip-ng crypto streams for encrypted ZIP) silently leaves the
+# link with undefined symbols. If `g++` below fails on an unresolved symbol
+# that clearly lives in src/ or third_party/, check here first.
 VENDOR_7Z = ["7zAlloc", "7zArcIn", "7zBuf", "7zBuf2", "7zCrc", "7zCrcOpt",
              "7zDec", "7zFile", "7zStream", "Aes", "AesOpt", "Alloc", "Bcj2",
              "Bra", "Bra86", "BraIA64", "CpuArch", "Delta", "DllSecur",
@@ -60,8 +66,9 @@ VENDOR_7Z = ["7zAlloc", "7zArcIn", "7zBuf", "7zBuf2", "7zCrc", "7zCrcOpt",
              "Ppmd7Dec", "Sha256", "Sha256Opt", "SwapBytes"]
 ZLIB = ["adler32", "crc32", "deflate", "inffast", "inflate", "inftrees",
         "trees", "zutil"]
-MINIZIP = ["mz_crypt", "mz_os", "mz_os_posix", "mz_strm", "mz_strm_mem",
-           "mz_strm_os_posix", "mz_strm_zlib", "mz_zip"]
+MINIZIP = ["mz_crypt", "mz_crypt_wfm", "mz_os", "mz_os_posix", "mz_strm",
+           "mz_strm_mem", "mz_strm_os_posix", "mz_strm_pkcrypt",
+           "mz_strm_wzaes", "mz_strm_zlib", "mz_zip"]
 EXTRA_LIBS = ["-lole32", "-loleaut32", "-luuid", "-ladvapi32", "-luser32",
               "-lshell32"]
 
@@ -79,8 +86,8 @@ def build_bench():
     # with gcc and the link goes through g++.
     unrar = sorted(glob.glob(os.path.join(HT_BUILD, "unrar7_*.o")))
     needed = (objs(SZ_BUILD, ["sevenz_extract", "sevenz_chain",
-                              "sevenz_mt", "sevenz_volstream", "zipx_common",
-                              "zipx_volume"])
+                              "sevenz_header", "sevenz_mt", "sevenz_volstream",
+                              "zipx_common", "zipx_volume"])
               + objs(HT_BUILD, ["zip_extract", "zipx_volstream", "rar_extract"])
               + objs(HT_BUILD, ZLIB) + objs(HT_BUILD, MINIZIP)
               + objs(SZ_BUILD, VENDOR_7Z) + unrar)

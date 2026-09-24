@@ -124,6 +124,9 @@ zipx_limits_profile(int profile) {
   Each entry is first written to a staging directory (`*.wfm-part-*`),
   `fsync()`'d, then atomically renamed into place. A failure mid-archive
   rolls back partial changes.
+  *(Superseded 2026-09-16: the per-entry `fsync` was removed — all three
+  engines now apply "sync nothing, rename everything". See
+  `docs/EXTRACTION-PERF.md`.)*
 * Security checks run before any output file is opened:
   - encryption
   - path traversal (`..`), absolute POSIX paths, Windows drive letters

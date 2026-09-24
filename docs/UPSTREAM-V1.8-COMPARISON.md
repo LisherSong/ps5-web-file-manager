@@ -112,7 +112,7 @@ README 原文：
 | 压缩比筛查 | ✅ `max_ratio` 500/1000，**1 GiB 下限豁免**小文件 | `zip_extract.c` |
 | 磁盘空间预检 | ✅ `check_space()` 按**解压后总量**查 `statvfs` | `zip_extract.c:636` |
 | 路径穿越防护 | ✅ 有专项测试（`path traversal variants`） | 测试矩阵 |
-| 原子发布 | ✅ staging 目录 + 整 rename + 每 entry fsync | 三引擎统一 |
+| 原子发布 | ✅ staging 目录 + 整 rename（**无逐条目 fsync**，2026-09-16 起） | 三引擎统一 |
 | 冲突策略 | ✅ FAIL / OVERWRITE / MERGE，目录碰撞递归下钻 | 三引擎统一 |
 | 取消 | ✅ 条目粒度 | — |
 | 任务恢复 | ❌ **没有** | — |

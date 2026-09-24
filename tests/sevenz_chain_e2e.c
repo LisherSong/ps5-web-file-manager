@@ -33,6 +33,7 @@
 #include "7zFile.h"
 
 #include "sevenz_chain.h"
+#include "sevenz_header.h"
 #include "sevenz_volstream.h"
 
 #define INPUT_BUF_SIZE (1u << 18)
@@ -346,6 +347,9 @@ int main(int argc, char **argv) {
   char vol_desc[512];
   int is_set = 0;
   int rc = 0;
+  szh_prep *hdr_prep = NULL;
+  ISeekInStream *hdr_stream = NULL;
+  char hdr_msg[256] = "";
 
   if(argc < 3) {
     fprintf(stderr, "usage: %s <archive.7z> <out-dir> [password]\n", argv[0]);
@@ -367,19 +371,50 @@ int main(int argc, char **argv) {
     return 1;
   }
   look_stream.bufSize = INPUT_BUF_SIZE;
-  look_stream.realStream = sevenz_volstream_stream(vol);
+
+  /* Same order as src/sevenz_extract.c: an encrypted header has to come off
+     before the SDK can see the folder table. */
+  hdr_stream = sevenz_volstream_stream(vol);
+  {
+    szh_status_t hs = szh_prepare(&hdr_prep, hdr_stream,
+                                  argc > 3 ? argv[3] : NULL, hdr_msg,
+                                  sizeof(hdr_msg));
+
+    if(hs == SZH_PATCHED) {
+      hdr_stream = szh_stream(hdr_prep);
+    } else if(hs != SZH_PLAIN) {
+      fprintf(stderr, "%s: %s\n", vol_desc,
+              hdr_msg[0] ? hdr_msg : szh_status_string(hs));
+      szh_prep_free(hdr_prep);
+      sevenz_volstream_free(vol);
+      return 1;
+    }
+  }
+  look_stream.realStream = hdr_stream;
   LookToRead2_INIT(&look_stream)
+  {
+    Int64 zero = 0;
+
+    if(hdr_stream->Seek(hdr_stream, &zero, SZ_SEEK_SET) != SZ_OK) {
+      fprintf(stderr, "%s: cannot rewind the archive\n", vol_desc);
+      szh_prep_free(hdr_prep);
+      sevenz_volstream_free(vol);
+      return 1;
+    }
+  }
 
   CrcGenerateTable();
   SzArEx_Init(&db);
 
   res = SzArEx_Open(&db, &look_stream.vt, &g_alloc, &g_temp);
+  /* The header is in `db` now; nothing reads through the view again. */
+  szh_prep_free(hdr_prep);
+  hdr_prep = NULL;
   if(res != SZ_OK) {
     if(res == SZ_ERROR_UNSUPPORTED)
       fprintf(stderr,
-              "%s: the archive header is encrypted (-mhe=on); this build reads "
-              "encrypted *streams* only, so the header itself cannot be "
-              "decoded\n",
+              "%s: the archive header is compressed with a method this build "
+              "does not have\n",
               vol_desc);
     else
       fprintf(stderr, "%s: cannot read the 7z header (res=%d)\n", vol_desc,

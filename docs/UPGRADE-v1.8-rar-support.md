@@ -144,6 +144,13 @@ progress callbacks and result-mapping logic are copied from
 engines can evolve independently. (Refactoring them into a
 `src/archive_common/` module is on the post-v1.9 roadmap; see §10.)
 
+> **Note — superseded 2026-09-16.** The per-entry `fsync` described above was
+> removed. It cost 20–30 minutes on a 95k-file archive and bought nothing the
+> design needs: a crash mid-extract leaves the staging tree, which is discarded
+> on the next run, and publish is a rename-only phase. All three engines now
+> share the same "sync nothing, rename everything" policy. Measurements and the
+> accepted durability trade-off: `docs/EXTRACTION-PERF.md`.
+
 ### 3.3 Error mapping
 
 `rar_translate_error()` in `src/rar_extract.c` maps the dmc_unrar

@@ -175,7 +175,10 @@ extract_dispatch(file_task_t *task, zipx_conflict_t conflict,
 
     if(kind == 0) {
       status = zipx_extract(task->src, task->dst, conflict, limits,
-                            extract_cancel, extract_progress, task, result);
+                            extract_cancel, extract_progress, task,
+                            task->extract_password[0] ? task->extract_password
+                                                      : NULL,
+                            result);
     } else if(kind == 1) {
       /* unrar chains its own volume naming (x.part1.rar); a byte contiguous
          set named x.rar.001 cannot be handed to it as-is. */
@@ -202,11 +205,17 @@ extract_dispatch(file_task_t *task, zipx_conflict_t conflict,
   }
   if(ends_with_ci(task->src, ".zip")) {
     return zipx_extract(task->src, task->dst, conflict, limits,
-                        extract_cancel, extract_progress, task, result);
+                        extract_cancel, extract_progress, task,
+                        task->extract_password[0] ? task->extract_password
+                                                  : NULL,
+                        result);
   }
   if(ends_with_ci(task->src, ".rar")) {
     return rar_extract(task->src, task->dst, conflict, limits,
-                       extract_cancel, extract_progress, task, result);
+                       extract_cancel, extract_progress, task,
+                       task->extract_password[0] ? task->extract_password
+                                                 : NULL,
+                       result);
   }
   if(ends_with_ci(task->src, ".7z")) {
     return sevenz_extract(task->src, task->dst, conflict, limits,
@@ -236,6 +245,7 @@ extract_error_code(zipx_status_t status) {
   case ZIPX_ERR_LIMIT_RATIO: return "extract_ratio";
   case ZIPX_ERR_LIMIT_DEPTH: return "extract_too_deep";
   case ZIPX_ERR_LIMIT_NAME: return "extract_name_too_long";
+  case ZIPX_ERR_LIMIT_DICT: return "extract_dict_too_large";
   case ZIPX_ERR_CONFLICT: return "extract_conflict";
   case ZIPX_ERR_SPACE: return "no_space";
   case ZIPX_ERR_IO: return "extract_io";

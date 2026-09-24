@@ -172,7 +172,7 @@ run_cases(const char *fx, const char *work) {
               ZIPX_CONFLICT_FAIL, zipx_default_limits(), NULL,
               ZIPX_ERR_PASSWORD, "7zAES");
   {
-    char b2[256];
+    char b2[ZIPX_PATH_MAX + 96];
     zipx_result_t r;
     (void)sevenz_extract(arc, dst, ZIPX_CONFLICT_FAIL,
                          zipx_default_limits(), NULL, NULL, NULL,
@@ -188,12 +188,29 @@ run_cases(const char *fx, const char *work) {
   check(extract_one(arc, dst, PASSWORD) == 0,
         "aes extracts with the right password");
 
-  /* --- encrypted header ---------------------------------------------- */
+  /* --- encrypted header (-mhe=on) ------------------------------------- */
+  /* The file names, the folder table and every entry size live inside the
+     encrypted header, so this is the case where nothing at all is readable
+     without the password -- not even the entry list. */
   snprintf(arc, sizeof(arc), "%s/aeshe.7z", fx);
-  snprintf(dst, sizeof(dst), "%s/he", work);
+
+  snprintf(dst, sizeof(dst), "%s/he-missing", work);
   mkdir(dst, 0777);
-  expect_fail("aeshe (encrypted header)", arc, dst, PASSWORD, ZIPX_CONFLICT_FAIL,
-              zipx_default_limits(), NULL, ZIPX_ERR_UNSUPPORTED, "-mhe=on");
+  expect_fail("aeshe with no password", arc, dst, NULL, ZIPX_CONFLICT_FAIL,
+              zipx_default_limits(), NULL, ZIPX_ERR_PASSWORD, "mhe=on");
+  check(!has_staging_leftover(work), "no staging tree survives a locked header");
+
+  snprintf(dst, sizeof(dst), "%s/he-wrong", work);
+  mkdir(dst, 0777);
+  expect_fail("aeshe with the wrong password", arc, dst, "NotThePassword",
+              ZIPX_CONFLICT_FAIL, zipx_default_limits(), NULL,
+              ZIPX_ERR_PASSWORD, "password");
+
+  snprintf(dst, sizeof(dst), "%s/he-ok", work);
+  mkdir(dst, 0777);
+  check(extract_one(arc, dst, PASSWORD) == 0,
+        "aeshe extracts and verifies with the right password");
+  check(!has_staging_leftover(work), "no staging tree survives an aeshe run");
 
   /* --- open failures -------------------------------------------------- */
   snprintf(dst, sizeof(dst), "%s/missing-file", work);

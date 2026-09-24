@@ -20,7 +20,7 @@ typedef enum {
   ZIPX_ERR_CANCELED,
   ZIPX_ERR_OPEN,       /* cannot open the archive */
   ZIPX_ERR_FORMAT,     /* corrupt central directory / truncated */
-  ZIPX_ERR_UNSUPPORTED,/* encryption, multipart or unsupported method */
+  ZIPX_ERR_UNSUPPORTED,/* multipart or unsupported compression method */
   ZIPX_ERR_UNSAFE_NAME,/* traversal, absolute path, control chars, NUL */
   ZIPX_ERR_SPECIAL,    /* symlink / device / fifo / socket entry */
   ZIPX_ERR_DUPLICATE,  /* repeated entry or file/dir name clash inside zip */
@@ -30,6 +30,8 @@ typedef enum {
   ZIPX_ERR_LIMIT_RATIO,
   ZIPX_ERR_LIMIT_DEPTH,
   ZIPX_ERR_LIMIT_NAME,
+  ZIPX_ERR_LIMIT_DICT, /* the archive's dictionary exceeds what we allow
+                          (RAR7 headers may ask for up to 64 GiB) */
   ZIPX_ERR_CONFLICT,   /* target already exists for the chosen policy */
   ZIPX_ERR_PASSWORD,   /* the archive is encrypted and the password is missing
                           or wrong; the caller can prompt and retry */
@@ -101,6 +103,10 @@ const zipx_limits_t *zipx_limits_profile(int profile);
 const char *zipx_status_string(zipx_status_t status);
 
 /* Extract zip_path into dst_dir.
+   `password` may be NULL or empty when the archive is not encrypted; it is
+   used for both ZIP encryption schemes, traditional PKWARE ("ZipCrypto") and
+   WinZip AES. A missing or wrong password is reported as ZIPX_ERR_PASSWORD,
+   which the caller is expected to turn into a prompt and retry.
    Returns ZIPX_OK or an error code; *result is always filled in.
    On any failure the staging directory is removed and dst_dir is left as it
    was, except for objects already published with the overwrite policy. */
@@ -110,4 +116,5 @@ zipx_status_t zipx_extract(const char *zip_path, const char *dst_dir,
                            zipx_cancel_fn cancel,
                            zipx_progress_fn progress,
                            void *userdata,
+                           const char *password,
                            zipx_result_t *result);

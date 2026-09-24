@@ -14,10 +14,25 @@ ifeq ($(MAKECMDGOALS),)
 endif
 
 # Bump this together with the git tag -- it is baked into the binary (the PS5
-# notification and `--version` print it) AND into the output filename, so a
-# stale value silently mislabels everything. Override per-build with:
-#   make VERSION_TAG=v1.9.2
-VERSION_TAG ?= v1.9.2
+# notification, the stdout banner and /api/version all print it) AND into the
+# output filename, so a stale value silently mislabels everything. Override
+# per-build with:
+#   make VERSION_TAG=v1.9.3M
+#
+# **The trailing M is the fork marker** (Modified build, maintained by
+# LisherSong). Upstream owendswang releases are plain `vX.Y.Z`, so any string
+# carrying the M is ours and anything without it is not. The marker rides on
+# VERSION_TAG rather than on a separate display-only constant on purpose: it
+# therefore reaches every surface at once -- /api/version, the PS5 start-up
+# notification, the stdout banner, the UI footer and the ELF file name -- and
+# is impossible to forget in one of them. The file name gains a second benefit:
+# a fork build can no longer collide with an upstream artifact of the same
+# upstream version, which has already caused two mix-ups (a local
+# `web-file-mgr-v1.9.2.elf` sitting next to the released one under the same
+# name, and a `-DVERSION_TAG=v1.9.1` leftover wearing the released 870 488 B
+# file's size). To cut a build that is byte-for-byte upstream-shaped, pass
+# `make VERSION_TAG=v1.9.3`.
+VERSION_TAG ?= v1.9.3M
 TITLE_ID    := FMGR88888
 PYTHON      ?= python3
 STRIP       ?= $(PS5_PAYLOAD_SDK)/bin/prospero-strip
@@ -30,7 +45,7 @@ HOST_PKG_CONFIG ?= pkg-config
 # and you can tell at a glance which ELF is on the USB stick.
 BIN        := web-file-mgr-$(VERSION_TAG).elf
 LINUX_BIN  := web-file-mgr-linux-$(VERSION_TAG)
-COMMON_SRCS := src/main.c src/websrv.c src/filemgr.c src/file_response.c src/task.c src/upload.c src/download.c src/text.c src/list.c src/space.c src/version.c src/fs_util.c src/json_util.c src/path_util.c src/asset.c src/mime.c src/notify.c src/pkg_installer.c src/pkg_info.c src/extract.c src/zip_extract.c src/rar_extract.c src/zipx_volume.c src/zipx_volstream.c src/zipx_common.c src/sevenz_extract.c src/sevenz_chain.c src/sevenz_volstream.c src/sevenz_mt.c src/demangle_stub.c
+COMMON_SRCS := src/main.c src/websrv.c src/filemgr.c src/file_response.c src/task.c src/upload.c src/download.c src/text.c src/list.c src/space.c src/version.c src/fs_util.c src/json_util.c src/path_util.c src/asset.c src/mime.c src/notify.c src/pkg_installer.c src/pkg_info.c src/extract.c src/zip_extract.c src/rar_extract.c src/zipx_volume.c src/zipx_volstream.c src/zipx_common.c src/sevenz_extract.c src/sevenz_chain.c src/sevenz_header.c src/sevenz_volstream.c src/sevenz_mt.c src/demangle_stub.c
 PS5_SRCS    := $(COMMON_SRCS) src/app_installer.c src/cpu_support_stub.c
 LINUX_SRCS  := $(COMMON_SRCS)
 BASE_ASSETS := $(filter-out %.dds,$(wildcard assets/*))
@@ -84,9 +99,16 @@ THIRD_PARTY_C_SRCS   := $(wildcard third_party/zlib/src/*.c) $(wildcard third_pa
 # every one of these, so we just enable them for the 7z TU family instead of
 # dropping AesOpt.c (Aes.c references those HW symbol names via AesGenTables).
 SEVENZ_C_FLAGS        := -maes -mavx2 -mvaes
+# HAVE_WZAES / HAVE_PKCRYPT switch on minizip-ng's two ZIP encryption paths:
+# mz_strm_wzaes.c (WinZip AES, method 99 / extra field 0x9901) and
+# mz_strm_pkcrypt.c (traditional PKWARE "ZipCrypto"). The mz_zip.c branches
+# behind these macros are already present, so defining them only pulls in the
+# two streams plus the local crypto backend in mz_crypt_wfm.c. Everything they
+# need (crc32, PBKDF2-HMAC-SHA1, AES-ECB) is implemented in-tree; see the
+# header of third_party/minizip-ng/src/mz_crypt_wfm.c.
 THIRD_PARTY_C_FLAGS  := -O2 -w -Ithird_party/zlib/include -Ithird_party/minizip-ng/include -Ithird_party/7z \
   -DHAVE_ZLIB -DZLIB_COMPAT -DHAVE_UNISTD_H=1 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE \
-  -DHAVE_FSEEKO -DZ7_PPMD_SUPPORT
+  -DHAVE_FSEEKO -DZ7_PPMD_SUPPORT -DHAVE_WZAES -DHAVE_PKCRYPT
 THIRD_PARTY_C_FLAGS_7Z := $(THIRD_PARTY_C_FLAGS) $(SEVENZ_C_FLAGS)
 
 # Assembly-optimised LZMA decoder (optional, on when jwasm is present).
@@ -164,18 +186,54 @@ ps5-obj/third_party/7z/LzmaDec.o:   THIRD_PARTY_C_FLAGS_7Z += $(LZMA_DEC_OPT_FLA
 linux-obj/third_party/7z/LzmaDec.o: THIRD_PARTY_C_FLAGS_7Z += $(LZMA_DEC_OPT_FLAG)
 endif
 
-# make does not track flag changes, and installing or removing jwasm flips the
-# switch above. Without this, an existing LzmaDec.o silently keeps the old
-# decoder and the asm object just sits in the link line unreferenced (the
-# binary comes out byte-identical, which is how the problem was noticed).
-ps5-obj/third_party/7z/LzmaDec.o:   Makefile
-linux-obj/third_party/7z/LzmaDec.o: Makefile
+# make does not track compiler-flag changes, so an object built with the old
+# flags is silently reused and the binary links "successfully" without the
+# feature. Two cases have already bitten:
+#   * installing or removing jwasm flips LZMA_DEC_OPT_FLAG, and the asm object
+#     just sits in the link line unreferenced (the binary came out
+#     byte-identical, which is how the problem was noticed);
+#   * adding -DHAVE_WZAES / -DHAVE_PKCRYPT, which only mz_zip.c and mz_crypt.c
+#     compile differently -- without a rebuild the ZIP encryption streams are
+#     never referenced and --gc-sections quietly drops them again.
+# Recording the flags in a stamp file invalidates the objects when the flags
+# actually change, instead of rebuilding them for every unrelated Makefile edit.
+PS5_FLAGS_STAMP   := ps5-obj/.third_party_cflags
+LINUX_FLAGS_STAMP := linux-obj/.third_party_cflags
 
-ps5-obj/%.o: %.c
+$(PS5_FLAGS_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@printf '%s\n' '$(THIRD_PARTY_C_FLAGS_7Z) $(LZMA_DEC_OPT_FLAG)' > $@.tmp
+	@cmp -s $@.tmp $@ || { mv -f $@.tmp $@; echo '  [cflags] third-party flags changed -> rebuilding objects'; }
+	@rm -f $@.tmp
+
+$(LINUX_FLAGS_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@printf '%s\n' '$(THIRD_PARTY_C_FLAGS_7Z) $(LZMA_DEC_OPT_FLAG)' > $@.tmp
+	@cmp -s $@.tmp $@ || { mv -f $@.tmp $@; echo '  [cflags] third-party flags changed -> rebuilding objects'; }
+	@rm -f $@.tmp
+
+.PHONY: FORCE
+FORCE:
+
+# Note on -DVERSION_TAG / -DTITLE_ID: they live in CFLAGS, which make cannot
+# see -- but nothing here relies on make seeing them. The link target's *name*
+# carries the version ($(BIN) = web-file-mgr-$(VERSION_TAG).elf), so a bump
+# always misses the existing target and re-runs the link rule, and that rule
+# compiles every file in $(PS5_SRCS) on the spot (-x c, one clang invocation,
+# no intermediate .o). src/version.c and src/main.c -- the only two readers of
+# the macros -- are therefore always rebuilt with the new string. (Verified:
+# `strings` on the v1.9.3M ELF finds "v1.9.3M" once and "v1.9.2" zero times.)
+#
+# The version trap that *is* real: overriding VERSION_TAG back to a version
+# whose ELF already exists in the tree, with sources older than that file,
+# returns the existing file and silently skips the rebuild. Delete the stale
+# ELF, or build a differently named copy, when re-cutting a version.
+
+ps5-obj/%.o: %.c $(PS5_FLAGS_STAMP)
 	@mkdir -p $(dir $@)
 	$(CC) $(if $(findstring third_party/7z,$<),$(THIRD_PARTY_C_FLAGS_7Z),$(THIRD_PARTY_C_FLAGS)) -c -o $@ $<
 
-linux-obj/%.o: %.c
+linux-obj/%.o: %.c $(LINUX_FLAGS_STAMP)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(if $(findstring third_party/7z,$<),$(THIRD_PARTY_C_FLAGS_7Z),$(THIRD_PARTY_C_FLAGS)) -c -o $@ $<
 

@@ -250,7 +250,7 @@ body {
   flex: 1 1 auto;
 }
 
-.split-button {
+.upload-menu {
   position: relative;
   display: inline-flex;
   align-items: stretch;
@@ -259,31 +259,98 @@ body {
   margin-bottom: 15px;
 }
 
-.split-button .split-main {
+.upload-menu .upload-main {
   min-width: 82px;
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
   margin: 0;
 }
 
-.split-button .split-arrow {
-  min-width: 38px;
-  width: 38px;
-  padding: 0;
-  border-left: 0;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  margin: 0;
-}
-
-.split-arrow::before {
+/* The caret is what tells the user this button opens a list. Without it the
+   button looks like a plain one-shot action, which is exactly how the old
+   file/folder split was misread. */
+.upload-main::after {
   content: "";
   display: block;
   width: 0;
   height: 0;
+  margin-left: 10px;
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
   border-top: 7px solid #f2f5f7;
+}
+
+.upload-menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 700;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid #46515f;
+  border-radius: 8px;
+  background: #1b2128;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .5);
+}
+
+.upload-menu-list button {
+  height: 46px;
+  min-height: 46px;
+  min-width: 176px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  justify-content: flex-start;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* Menu rows highlight by fill only. The generic button ring (3px at offset
+   2px) is sized for a 54px toolbar button: on a 46px row it clears the
+   panel's 6px padding, overlaps the neighbouring row, and its corners do not
+   follow the row's radius, so the highlight reads as a broken shape rather
+   than a selected row. The panel's own hover fill had also never applied --
+   the generic `button:not(.row-action):hover:not(:disabled)` rule has the
+   same specificity (0,3,1) and comes later in this file, so it won and hover
+   and focus ended up two different colours. Scoping both rules to the panel
+   settles the cascade, and the keyboard cue is drawn inside the row where it
+   cannot cross the panel edge. */
+#uploadMenu button:focus {
+  outline: none;
+}
+
+#uploadMenu button:hover:not(:disabled),
+#uploadMenu button:focus-visible {
+  background: #2b343e;
+}
+
+#uploadMenu button:focus-visible {
+  box-shadow: inset 0 0 0 2px #6fb1ff;
+}
+
+/* The status can be a long "uploading 3/12: some-very-long-name.zip". The footer
+   is a fixed 46px row, so a wrapped status used to spill out of it; clamping it
+   to one line with an ellipsis is what keeps it, the hint and the version on the
+   same row at every width. */
+#statusText {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A hint that has to fit next to the status line and the version, so it shrinks
+   with an ellipsis instead of pushing either of them around. */
+.status-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0 16px;
+  overflow: hidden;
+  color: #6f7a84;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 button,
@@ -374,7 +441,10 @@ button.install-action:hover:not(:disabled) {
 }
 
 .extract-action {
-  min-width: 88px;
+  /* Matches the width of the other two-character verbs (copy/move/delete): the
+     button is on screen at all times now, so it has to line up with them
+     instead of being a special case that appears only on selection. */
+  min-width: 96px;
   border-color: #2a6b66;
   background: #17302e;
   color: #a8e6df;
@@ -382,6 +452,16 @@ button.install-action:hover:not(:disabled) {
 
 button.extract-action:hover:not(:disabled) {
   background: #1d3f3c;
+}
+
+/* The extract button is always on screen and only greys out when the selection
+   cannot be extracted, so the reason has to be readable. `button:disabled`
+   sets `pointer-events: none`, which makes the button un-hoverable and swallows
+   its `title` tooltip -- the same fix the parent-directory button already uses.
+   Clicks stay dead either way: the disabled attribute blocks activation
+   regardless of hit-testing. */
+.extract-action:disabled {
+  pointer-events: auto;
 }
 
 .paste-count {
@@ -1344,19 +1424,30 @@ input[type="checkbox"] {
     font-size: 16px;
   }
 
-  .split-button {
+  .upload-menu {
     height: 40px;
     min-height: 40px;
     margin-bottom: 8px;
   }
 
-  .split-button .split-main {
+  .upload-menu .upload-main {
     min-width: 64px;
   }
 
-  .split-button .split-arrow {
-    min-width: 34px;
-    width: 34px;
+  .upload-menu-list {
+    padding: 4px;
+  }
+
+  .upload-menu-list button {
+    height: 38px;
+    min-height: 38px;
+    min-width: 148px;
+    padding: 0 12px;
+  }
+
+  .status-hint {
+    margin: 0 10px;
+    font-size: 14px;
   }
 
   .paste-action {

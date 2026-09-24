@@ -39,7 +39,8 @@ let L = {};
 // /api/version, which reports the build's VERSION_TAG -- see loadVersion().
 // Keeping a literal here used to be the only source, and it inevitably
 // drifted (the footer said "v1.9" throughout the v1.9.1 release).
-const APP_VERSION_FALLBACK = "v1.9.2";
+// The trailing "M" is the fork marker; see VERSION_TAG in the Makefile.
+const APP_VERSION_FALLBACK = "v1.9.3M";
 const LAST_PATH_KEY = "ps5-web-file-mgr:last-path";
 const SORT_KEY = "ps5-web-file-mgr:list-sort";
 const LOADING_DISPLAY_DELAY = 250;
@@ -73,7 +74,10 @@ const extractBtn = document.getElementById("extractBtn");
 const clearClipboardBtn = document.getElementById("clearClipboardBtn");
 const downloadBtn = document.getElementById("downloadBtn");
 const uploadBtn = document.getElementById("uploadBtn");
-const uploadFolderBtn = document.getElementById("uploadFolderBtn");
+const uploadMenuEl = document.getElementById("uploadMenu");
+const uploadFilesItemEl = document.getElementById("uploadFilesItem");
+const uploadFolderItemEl = document.getElementById("uploadFolderItem");
+const dropHintEl = document.getElementById("dropHint");
 const uploadFilesEl = document.getElementById("uploadFiles");
 const uploadFolderEl = document.getElementById("uploadFolder");
 const dropUploadOverlayEl = document.getElementById("dropUploadOverlay");
@@ -149,7 +153,15 @@ function t(key, params) {
 }
 
 function backendErrorText(code, arg, fallback) {
-  if (!code) return fallback || t("backendError");
+  if (!code) return decodeFsText(fallback) || t("backendError");
+  // Names arrive byte-mapped (see decodeFsText below): the server escapes every
+  // byte >= 0x80 as \u00XX so that names which are not valid UTF-8 -- a GBK entry
+  // name inside a ZIP, say -- survive the JSON round trip unchanged. The listing
+  // has always translated them back for display; an error message must do the
+  // same, or the entry name is unreadable at the exact moment the user needs to
+  // read it (which is how "解压失败: ... â®â¡.psd" happened).
+  arg = decodeFsText(arg);
+  fallback = decodeFsText(fallback);
   const params = { path: arg || "", arg: arg || "" };
   if (code === "no_space") {
     const parts = String(arg || "").split(",");
@@ -177,13 +189,18 @@ function applyStaticText() {
   if (isPlayStationBrowser()) {
     for (const el of document.querySelectorAll(".remote-only")) el.hidden = true;
   }
+  // The hint starts hidden so the console browser never flashes it; the browser
+  // that can actually drag (and therefore has the upload button) shows it.
+  dropHintEl.hidden = isPlayStationBrowser();
   exitBtn.title = t("exit");
   exitBtn.setAttribute("aria-label", t("exit"));
-  uploadFolderBtn.title = t("uploadFolder");
-  uploadFolderBtn.setAttribute("aria-label", t("uploadFolder"));
   parentBtn.title = t("parent");
   parentBtn.setAttribute("aria-label", t("parent"));
   versionEl.textContent = APP_VERSION_FALLBACK;
+  // "v1.9.3M" is opaque to anyone who has not read the release notes, so spell
+  // out what the trailing M means on hover. loadVersion() only rewrites the
+  // text, never the tooltip, so this survives the /api/version round trip.
+  versionEl.title = t("versionTooltip");
   if (initLoadingEl) initLoadingEl.hidden = true;
 }
 
@@ -326,6 +343,32 @@ function decodeFsBytes(bytes, fallback) {
       return fallback;
     }
   }
+}
+
+// The inverse of decodeFsText(): turn a real Unicode name -- one that came from
+// a File object or a prompt, not from the server -- into the byte-mapped form
+// the server expects. Anything that crosses over has to be in one convention,
+// because the server byte-repairs a path only when every non-ASCII code point in
+// it is <= 0xFF: a single real CJK character in the same string makes
+// fs_path_value() leave the whole thing alone, and a half-repaired path finds
+// nothing on disk.
+function encodeFsText(text) {
+  text = String(text || "");
+  const encoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
+  if (!encoder) return text;
+  let bytes;
+  try {
+    bytes = encoder.encode(text);
+  } catch (err) {
+    return text;
+  }
+  let ascii = true;
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] >= 0x80) ascii = false;
+    out += String.fromCharCode(bytes[i]);
+  }
+  return ascii ? text : out;
 }
 
 function isUtf8Bytes(bytes) {
@@ -528,6 +571,10 @@ function handleTerminalTask(task) {
   }
   if (task.state === "failed") {
     clearTrackedTask();
+    if (task.op === "extract" && task.error_code === "extract_password" &&
+        retryExtractWithPassword(task)) {
+      return;
+    }
     const message = taskFailureMessage(task);
     setStatus(message);
     alert(message);
@@ -872,7 +919,69 @@ function actionInstallSelectedPkgs() {
   return queuePkgInstall(selectedEntries().filter(isPkgPackage));
 }
 
-async function startExtractTask(path, dstDir, conflict, removeSource, name, large, password) {
+// The engine reports a missing or wrong password as `extract_password`. ZIP and
+// RAR only find out once they have looked inside, so they are not asked up
+// front; the failed task is re-sent with whatever the user types here instead.
+// Remembering the original request is what keeps the conflict policy and the
+// large-file opt-in intact across the retry.
+//
+// The request is remembered by TASK ID, never by path. Paths travel through the
+// byte-mapped JSON described at decodeFsText(), and the server maps them back to
+// raw bytes on the way in (fs_path_value), so the string this page holds for a
+// directory and the one the task reports back differ for every name that is not
+// pure ASCII. Keying the retry by path therefore made the password prompt
+// silently never appear for archives in a non-ASCII directory -- the exact case
+// the retry exists for. The id is assigned by the server and survives the round
+// trip untouched.
+const MAX_EXTRACT_PASSWORD_RETRIES = 3;
+const extractRequestRetries = new Map();
+
+function extractRetryKey(taskId) {
+  return "task:" + String(taskId);
+}
+
+// Entries are consumed by a retry or by a give-up, but a successful extraction
+// never asks for one again, so its entry would sit here for the life of the
+// page. Only one task can be live at a time (the server rejects a second with
+// 409), so anything older than the last few is dead weight.
+const MAX_REMEMBERED_EXTRACTS = 8;
+
+function rememberExtractRequest(taskId, entry) {
+  extractRequestRetries.set(extractRetryKey(taskId), entry);
+  while (extractRequestRetries.size > MAX_REMEMBERED_EXTRACTS) {
+    extractRequestRetries.delete(extractRequestRetries.keys().next().value);
+  }
+}
+
+function retryExtractWithPassword(task) {
+  const key = extractRetryKey(task.id);
+  const remembered = extractRequestRetries.get(key);
+  if (!remembered || remembered.attempts >= MAX_EXTRACT_PASSWORD_RETRIES) {
+    extractRequestRetries.delete(key);
+    return false;
+  }
+  // The first failure is usually "no password was given at all"; only a later
+  // one is a password that did not work. Saying "the password is wrong" to
+  // someone who was never asked for one is what made this flow look broken.
+  const asked = prompt(t(remembered.attempts
+    ? "extractPasswordRetryAsk" : "extractPasswordFirstAsk"), "");
+  if (!asked) {
+    // Cancel or an empty box means "give up": fall through so the normal failure
+    // report still explains what happened.
+    extractRequestRetries.delete(key);
+    return false;
+  }
+  // Consume the entry: the retry below registers itself under the new task id.
+  extractRequestRetries.delete(key);
+  clearTrackedTask();
+  startExtractTask(task.src, task.dst, remembered.conflict,
+                   remembered.removeSource, remembered.name, remembered.large,
+                   asked, remembered.attempts + 1);
+  return true;
+}
+
+async function startExtractTask(path, dstDir, conflict, removeSource, name, large,
+                                password, attempts) {
   try {
     taskRefreshPath = cwd;
     setBusy(true);
@@ -886,6 +995,10 @@ async function startExtractTask(path, dstDir, conflict, removeSource, name, larg
     };
     if (password) form.password = password;
     const data = await apiForm("/api/extract", form);
+    rememberExtractRequest(data.task_id, {
+      conflict, removeSource, name, large: Boolean(large),
+      attempts: Number(attempts || 0)
+    });
     trackTask(data.task_id, "extract", false);
     clearSelection(false);
     await pollTasks();
@@ -922,6 +1035,9 @@ function actionExtract() {
   // 7z archives can be encrypted (7zAES); ask up front so an unprotected
   // archive doesn't pay a wasted scan + folder parse.  An empty submission is
   // fine — the engine returns ZIPX_ERR_PASSWORD and the user retries.
+  // ZIP and RAR are not asked here: their headers are readable either way, so
+  // an empty password costs nothing and a failed attempt is retried through
+  // retryExtractWithPassword() instead of interrupting every extraction.
   let password = "";
   if (isSevenZipArchive(item) || isSevenZipSplitVolume(item)) {
     const asked = prompt(t("extractPasswordAsk"), "");
@@ -1254,7 +1370,9 @@ async function actionNewText() {
   if (input === null) return;
   const name = input.trim();
   if (!name) return;
-  const item = { name, path: pathJoin(dir, name), type: "-" };
+  // dir is the byte-mapped echo of the listing; name typed here is real Unicode.
+  // Joining them raw would hand the server a path it cannot repair.
+  const item = { name, path: pathJoin(dir, encodeFsText(name)), type: "-" };
 
   try {
     setBusy(true);
@@ -1430,25 +1548,26 @@ function renderExtractButton(items, locked) {
   const archives = items.filter(isExtractableArchive);
   const subs    = items.filter(isRarSubVolume);
 
-  // 没有可解压档案也没有子卷 → 隐藏按钮
-  if (archives.length === 0 && subs.length === 0) {
-    extractBtn.hidden = true;
-    extractBtn.title = "";
-    extractBtn.disabled = true;
+  /* The button is always on screen and merely greys out when the selection
+     cannot be extracted. It used to be hidden until an archive was selected,
+     which left the resting toolbar with no extract entry at all -- the same
+     discoverability problem the upload button was changed for. Being disabled
+     is not self-explanatory though, so the tooltip carries the reason. */
+  if (archives.length === 1) {
+    extractBtn.title = t("extractToCurrent") + ": " + itemTitle(archives);
+    extractBtn.disabled = locked;
     return;
   }
 
-  extractBtn.hidden = false;
-
-  // 只选中子卷(比如 .part02.rar),没有对应主卷 → 按钮置灰 + 提示改选主卷
-  if (archives.length !== 1) {
+  extractBtn.disabled = true;
+  if (archives.length > 1) {
+    extractBtn.title = t("extractOneAtATime");
+  } else if (subs.length > 0) {
+    // 只选中子卷(比如 .part02.rar),没有对应主卷 → 置灰 + 提示改选主卷
     extractBtn.title = t("extractSelectMainVolume");
-    extractBtn.disabled = true;
-    return;
+  } else {
+    extractBtn.title = t("extractSelectArchive");
   }
-
-  extractBtn.title = t("extractToCurrent") + ": " + itemTitle(archives);
-  extractBtn.disabled = locked;
 }
 
 function singleSelected() {
@@ -1469,7 +1588,9 @@ function updateButtons() {
   downloadBtn.disabled = locked || items.length === 0;
   document.getElementById("refreshBtn").disabled = locked;
   uploadBtn.disabled = locked;
-  uploadFolderBtn.disabled = locked;
+  uploadFilesItemEl.disabled = locked;
+  uploadFolderItemEl.disabled = locked;
+  if (locked && uploadMenuOpen) setUploadMenuOpen(false);
   document.getElementById("mkdirBtn").disabled = locked;
   newTextBtn.disabled = locked;
   for (const button of filesEl.querySelectorAll(".row-action, .mode-action")) button.disabled = locked;
@@ -2397,18 +2518,74 @@ async function uploadFiles(files, relativeNames) {
   }
 }
 
-// Two one-click entries rather than a menu: the main button picks files, the
-// arrow picks a folder. A native file dialog is either file-only or
-// folder-only (webkitdirectory), so a single dialog cannot offer both; the
-// drop target below is the one gesture that accepts either.
+// A native file dialog is either file-only or folder-only (webkitdirectory), so
+// a single dialog cannot offer both. The button therefore opens a two-entry
+// list: a main button plus a small caret next to it was the old shape, and users
+// read the caret as decoration and never found "upload a folder" at all. The
+// drop target below is still the one gesture that accepts either.
+let uploadMenuOpen = false;
+
+function uploadMenuItems() {
+  return [uploadFilesItemEl, uploadFolderItemEl];
+}
+
+function setUploadMenuOpen(open) {
+  uploadMenuOpen = Boolean(open) && !busy && !loadingPath;
+  uploadMenuEl.hidden = !uploadMenuOpen;
+  uploadBtn.setAttribute("aria-expanded", uploadMenuOpen ? "true" : "false");
+}
+
+function toggleUploadMenu() {
+  if (busy || loadingPath) return;
+  setUploadMenuOpen(!uploadMenuOpen);
+  if (uploadMenuOpen) uploadMenuItems()[0].focus();
+}
+
 function actionUploadFiles() {
+  setUploadMenuOpen(false);
   if (busy || loadingPath) return;
   uploadFilesEl.click();
 }
 
 function actionUploadFolder() {
+  setUploadMenuOpen(false);
   if (busy || loadingPath) return;
   uploadFolderEl.click();
+}
+
+function moveUploadMenuFocus(step) {
+  const items = uploadMenuItems();
+  const current = items.indexOf(document.activeElement);
+  const next = ((current < 0 ? 0 : current + step) + items.length) % items.length;
+  items[next].focus();
+}
+
+function setupUploadMenu() {
+  // Closing on any click outside is what keeps a menu honest; it is bound to the
+  // document so that a reflowed toolbar cannot leave a stale open list behind.
+  document.addEventListener("click", event => {
+    if (!uploadMenuOpen) return;
+    const target = event.target;
+    if (target === uploadBtn || (target && uploadMenuEl.contains(target))) return;
+    setUploadMenuOpen(false);
+  });
+  document.addEventListener("keydown", event => {
+    if (!uploadMenuOpen) return;
+    if (event.key === "Escape") {
+      setUploadMenuOpen(false);
+      uploadBtn.focus();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      moveUploadMenuFocus(event.key === "ArrowDown" ? 1 : -1);
+    }
+  });
+  uploadBtn.addEventListener("keydown", event => {
+    if (uploadMenuOpen || event.key !== "ArrowDown") return;
+    event.preventDefault();
+    toggleUploadMenu();
+  });
 }
 
 // A dropped directory arrives as a FileSystemEntry, which has no recursive
@@ -2521,7 +2698,10 @@ async function uploadAndExtractFile(file, relativeName, alreadyAsked) {
     return;
   }
   const rel = relativeName || uploadRelativeName(file);
-  const zipPath = pathJoin(cwd, rel);
+  // cwd is the byte-mapped echo from the listing while rel comes straight from
+  // the File object; byte-map the name so the joined path stays in one
+  // convention (see encodeFsText).
+  const zipPath = pathJoin(cwd, encodeFsText(rel));
   if (!alreadyAsked &&
       !confirm(t("extractUploadConfirm", { name: rel, path: displayPath(cwd) }))) return;
   const conflict = confirm(t("extractOverwriteAsk")) ? "overwrite" : "fail";
@@ -2601,10 +2781,12 @@ clearClipboardBtn.addEventListener("click", clearClipboard);
 document.getElementById("renameBtn").addEventListener("click", actionRename);
 downloadBtn.addEventListener("click", actionDownload);
 document.getElementById("deleteBtn").addEventListener("click", actionDelete);
-uploadBtn.addEventListener("click", actionUploadFiles);
-uploadFolderBtn.addEventListener("click", actionUploadFolder);
+uploadBtn.addEventListener("click", toggleUploadMenu);
+uploadFilesItemEl.addEventListener("click", actionUploadFiles);
+uploadFolderItemEl.addEventListener("click", actionUploadFolder);
 uploadFilesEl.addEventListener("change", () => uploadFiles(uploadFilesEl.files));
 uploadFolderEl.addEventListener("change", () => uploadFiles(uploadFolderEl.files));
+setupUploadMenu();
 setupDropUpload();
 exitBtn.addEventListener("click", actionExit);
 parentBtn.addEventListener("click", actionParentDirectory);

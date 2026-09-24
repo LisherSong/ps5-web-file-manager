@@ -282,13 +282,84 @@ def rar_fixtures():
         shutil.rmtree(staging_dir, ignore_errors=True)
 
 
+def bigdict():
+    """dict-8g.rar -- a RAR5 block whose header asks for an 8 GiB dictionary.
+
+    This one cannot be produced by any compressor, so it is synthesised here:
+
+      * arcread.cpp:871 reads a RAR 5.0 dictionary as
+        `0x20000 << ((CompInfo>>10) & 0x0f)` -- FOUR bits, so the format's own
+        ceiling is 128 KiB << 15 = exactly 4 GiB, the same as our default
+        Cmd->WinSizeLimit (options.cpp:13).  No `-ma5` archive can ever ask for
+        more, which is why -m0 store archives never reach CheckWinLimit().
+      * Only a RAR7 header (UnpVer==1, five bits, up to UNPACK_MAX_DICT = 64 GiB)
+        can -- and Rar.exe 7.23 refuses to create one (`-ma4`, `-ma6`, `-ma7` all
+        exit 7; only `-ma5` works).
+
+    So we emit a minimal, valid RAR5 archive by hand: signature, main header,
+    one store-method file header (FHFL_CRC32 set), the raw payload, end block.
+    CompInfo says UnpVer=1 with 16 dictionary bits (= 8 GiB) plus
+    FCI_RAR5_COMPAT, and arcread.cpp:878 then forces the algorithm back to
+    VER_PACK5 -- the payload really is stored, so nothing has to decode it.
+
+    Method 0 also means Unpack::Init() is never reached, i.e. the archive
+    exercises exactly the gate under test (CheckWinLimit -> uiDictLimit ->
+    UCM_LARGEDICT) and never allocates anything multi-gigabyte.
+
+    Sanity check with rarlab's own tools before trusting a change here:
+        UnRAR.exe lt dict-8g.rar          -> "-md=8g"
+        UnRAR.exe t -mdx12g dict-8g.rar   -> all OK
+    Without -mdx UnRAR refuses it exactly as we do ("8 GB dictionary exceeds the
+    4 GB limit and needs more than 8 GB of memory").
+    """
+    name = b"hello.txt"
+    data = b"".join(b"line %04d dictionary probe payload\n" % i for i in range(200))
+    comp_info = 1 | (16 << 10) | 0x00100000  # UnpVer=1, method=0, 8 GiB, RAR5 compat
+
+    def vint(v):
+        out = bytearray()
+        while True:
+            c = v & 0x7F
+            v >>= 7
+            out.append(c | 0x80 if v else c)
+            if not v:
+                return bytes(out)
+
+    def block(htype, flags, payload, data_size=None):
+        # The HFL_DATA size lives in the block header prologue, right after the
+        # flags -- it is not part of the per-type payload (arcread.cpp:710).
+        hd = vint(htype) + vint(flags)
+        if data_size is not None:
+            hd += vint(data_size)
+        hd += payload
+        size = vint(len(hd))
+        # rawread.cpp:185 GetCRC50() == zlib.crc32 over (size field + header data)
+        crc = zlib.crc32(size + hd) & 0xFFFFFFFF
+        return struct.pack("<I", crc) + size + hd
+
+    main_hdr = block(1, 0x04, vint(0))                      # HEAD_MAIN, ArcFlags=0
+    file_hdr = block(2, 0x02,                               # HEAD_FILE, HFL_DATA
+                     vint(0x0004) +                         # FileFlags: FHFL_CRC32
+                     vint(len(data)) +                      # UnpSize
+                     vint(0) +                              # FileAttr
+                     struct.pack("<I", zlib.crc32(data) & 0xFFFFFFFF) +
+                     vint(comp_info) +
+                     vint(0) +                              # HostOS: Windows
+                     vint(len(name)) + name,
+                     data_size=len(data))
+    end_hdr = block(5, 0x00, vint(0))                       # HEAD_ENDARC
+
+    with open(path("dict-8g.rar"), "wb") as f:
+        f.write(b"Rar!\x1a\x07\x01\x00" + main_hdr + file_hdr + data + end_hdr)
+
+
 def main():
     fresh()
     for fn in (basic, stored, unicode_names, zip64, traversal,
                traversal_backslash, absolute, drive_letter, duplicate,
                file_dir_clash, symlink_entry, fifo_entry, encrypted, bad_crc,
                truncated, not_a_zip, bomb, medium_bomb, many_files,
-               conflict_source, rar_fixtures):
+               conflict_source, rar_fixtures, bigdict):
         fn()
     print("fixtures written to %s" % OUT)
     return 0

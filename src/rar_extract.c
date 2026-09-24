@@ -11,9 +11,11 @@
        single-volume archives.
      * Multi-volume archives: unrar auto-merges subsequent volumes by name
        pattern when all .partNN.rar files sit next to the opened volume.
-     * Encrypted RAR: the engine can decrypt via RARSetPassword, but the
-       password plumbing (API + UI) is not wired yet — encrypted archives
-       currently fail with ZIPX_ERR_UNSUPPORTED.
+     * Encrypted archives (`-p` data encryption and `-hp` header encryption):
+       the password is handed to the engine via RARSetPassword immediately
+       after RAROpenArchiveEx and before the first RARReadHeaderEx, which is
+       the order unrar needs to decrypt a RAR5 header. A missing or wrong
+       password surfaces as ZIPX_ERR_PASSWORD.
 
    See third_party/unrar7/VENDORED.md for the full integration notes. */
 
@@ -62,6 +64,9 @@ typedef struct {
   zipx_progress_fn progress;
   void *userdata;
   zipx_result_t *result;
+  /* NULL when no password was supplied. Owned by the caller for the whole
+     call; RARSetPassword copies it into the engine, so it never dangles. */
+  const char *password;
   uint64_t entries_total;
   uint64_t entries_done;
   uint64_t bytes_total;
@@ -69,6 +74,13 @@ typedef struct {
   uint64_t files_created;
   uint64_t dirs_created;
   uint64_t progress_floor;
+  /* Set by the UCM_LARGEDICT callback only: the dictionary the archive asks
+     for and the limit we refuse above, both in KiB (0 = never raised, i.e. the
+     archive's dictionary was within Cmd->WinSizeLimit). unrar hands these over
+     as p1/p2, so the refusal can name the real numbers instead of blaming the
+     entry that happened to be in flight. */
+  uint64_t dict_kb;
+  uint64_t dict_limit_kb;
   struct timespec last_report;
   char staging[ZIPX_PATH_MAX];
   char **created;
@@ -456,16 +468,33 @@ rar_translate_error(int code, const char *detail, rarx_ctx_t *c) {
 
   case ERAR_MISSING_PASSWORD:
   case ERAR_BAD_PASSWORD:
-    /* Password plumbing (API + UI) is not wired yet. */
-    return rarx_fail(c, ZIPX_ERR_UNSUPPORTED, detail,
-                     "encrypted RAR entries are not supported");
+    /* The archive needs a password we do not have, or the one supplied was
+       wrong. ZIPX_ERR_PASSWORD lets the caller prompt and retry. */
+    return rarx_fail(c, ZIPX_ERR_PASSWORD, detail,
+                     "the archive is encrypted and the password is missing "
+                     "or wrong");
 
   case ERAR_SMALL_BUF:
     return rarx_fail(c, ZIPX_ERR_LIMIT_NAME, detail, "name buffer is too small");
 
-  case ERAR_LARGE_DICT:
-    return rarx_fail(c, ZIPX_ERR_LIMIT_FILE, detail,
-                     "archive needs a larger dictionary than supported");
+  case ERAR_LARGE_DICT: {
+    /* Not "entry too large": the *dictionary* is, and that is a property of the
+       archive (RAR7 headers can ask for up to 64 GiB), not of the entry that
+       happened to be in flight. Report both numbers; unrar gave us exactly
+       these when it asked. */
+    char need[96];
+
+    if(c->dict_kb) {
+      snprintf(need, sizeof(need), "%llu MiB (limit %llu MiB)",
+               (unsigned long long)(c->dict_kb / 1024),
+               (unsigned long long)(c->dict_limit_kb / 1024));
+    } else {
+      snprintf(need, sizeof(need), "more than 4096 MiB");
+    }
+    return rarx_fail(c, ZIPX_ERR_LIMIT_DICT, need,
+                     "the archive needs a dictionary larger than this build "
+                     "supports (%s)", need);
+  }
 
   case ERAR_BAD_DATA:
     return rarx_fail(c, ZIPX_ERR_CRC, detail, "checksum mismatch in entry data");
@@ -651,12 +680,13 @@ scan_archive(HANDLE hArc, rarx_ctx_t *c) {
     }
     is_dir = (hdr.Flags & RHDF_DIRECTORY) ? 1 : 0;
 
-    /* Encrypted entries: the unrar engine can decrypt them via RARSetPassword,
-       but the password plumbing is not wired yet — reject up front with the
-       same message the v1.8 backend used. */
-    if(hdr.Flags & RHDF_ENCRYPTED) {
-      ret = rarx_fail(c, ZIPX_ERR_UNSUPPORTED, hdr.FileName,
-                      "encrypted RAR entries are not supported");
+    /* Encrypted entries are fine as long as a password is in play: the engine
+       decrypts them during RARProcessFile once RARSetPassword has run. With no
+       password, fail here — before anything is written to staging — so the
+       caller can prompt and retry. */
+    if((hdr.Flags & RHDF_ENCRYPTED) && !c->password) {
+      ret = rarx_fail(c, ZIPX_ERR_PASSWORD, hdr.FileName,
+                      "the archive is encrypted and no password was supplied");
       break;
     }
 
@@ -748,16 +778,35 @@ scan_archive(HANDLE hArc, rarx_ctx_t *c) {
 
    Returning -1 is how unrar aborts a run, but the break path is only armed
    when console break handling is enabled, which never happens in DLL mode —
-   so we always return 0 and cancellation stays entry-granular. */
+   so we always return 0 and cancellation stays entry-granular.
+
+   The same callback is the only channel through which unrar asks permission
+   for an oversized dictionary (UCM_LARGEDICT); see below. */
 static int CALLBACK
 rar_data_cb(UINT msg, LPARAM user, LPARAM p1, LPARAM p2) {
   rarx_ctx_t *c = (rarx_ctx_t *)user;
-  (void)p1;
 
   if(msg == UCM_PROCESSDATA) {
     c->bytes_done += (uint64_t)(unsigned long)p2;
     report(c, ZIPX_PHASE_EXTRACT, NULL, 0);
+    return 0;
   }
+
+  if(msg == UCM_LARGEDICT) {
+    /* unrar asks permission before it allocates a window bigger than
+       Cmd->WinSizeLimit (default 4 GiB, options.cpp:13). Answering 1 would let
+       the run continue -- and that is a *trap*, not a fix: the window is one
+       contiguous allocation of the full dictionary size, and rarlab's own CLI
+       refuses the same case with "8 GB dictionary exceeds the 4 GB limit and
+       needs more than 8 GB of memory; use -md8g or -mdx8g". A PS5 has 16 GB of
+       shared memory, so >4 GiB dictionaries are not extractable there anyway;
+       failing cleanly beats being OOM-killed mid-extraction with the UI gone.
+       Record the numbers (p1/p2, both KiB) so the refusal can explain itself. */
+    c->dict_kb = (uint64_t)(unsigned long)p1;
+    c->dict_limit_kb = (uint64_t)(unsigned long)p2;
+    return 0;
+  }
+
   return 0;
 }
 
@@ -794,10 +843,10 @@ extract_archive(HANDLE hArc, rarx_ctx_t *c) {
       ret = rarx_fail(c, ZIPX_ERR_FORMAT, NULL, "empty entry name");
       break;
     }
-    if(hdr.Flags & RHDF_ENCRYPTED) {
-      /* scan already rejected these; defensive only. */
-      ret = rarx_fail(c, ZIPX_ERR_UNSUPPORTED, hdr.FileName,
-                      "encrypted RAR entries are not supported");
+    if((hdr.Flags & RHDF_ENCRYPTED) && !c->password) {
+      /* scan already rejected password-less encrypted sets; defensive only. */
+      ret = rarx_fail(c, ZIPX_ERR_PASSWORD, hdr.FileName,
+                      "the archive is encrypted and no password was supplied");
       break;
     }
 
@@ -989,7 +1038,7 @@ zipx_status_t
 rar_extract(const char *rar_path, const char *dst_dir,
             zipx_conflict_t conflict, const zipx_limits_t *limits,
             zipx_cancel_fn cancel, zipx_progress_fn progress,
-            void *userdata, zipx_result_t *result) {
+            void *userdata, const char *password, zipx_result_t *result) {
   rarx_ctx_t ctx;
   rarx_ctx_t *c = &ctx;
   char parent[ZIPX_PATH_MAX];
@@ -1016,6 +1065,9 @@ rar_extract(const char *rar_path, const char *dst_dir,
   c->cancel = cancel;
   c->progress = progress;
   c->userdata = userdata;
+  /* An empty string means "no password" so that callers can pass the raw
+     form field without a separate emptiness check. */
+  c->password = (password && password[0]) ? password : NULL;
 
   snprintf(dst_copy, sizeof(dst_copy), "%s", dst_dir);
   {
@@ -1051,6 +1103,11 @@ rar_extract(const char *rar_path, const char *dst_dir,
     if(!hArc) {
       status = rar_translate_error((int)od.OpenResult, rar_path, c);
       goto done;
+    }
+    /* Must precede the first RARReadHeaderEx: unrar needs the password in
+       place to decrypt a -hp (encrypted header) archive. */
+    if(c->password) {
+      WFM_RAR_PASSWORD(hArc, (char *)c->password);
     }
   }
 
@@ -1093,6 +1150,9 @@ rar_extract(const char *rar_path, const char *dst_dir,
     if(!hArc) {
       status = rar_translate_error((int)od.OpenResult, rar_path, c);
       goto done;
+    }
+    if(c->password) {
+      WFM_RAR_PASSWORD(hArc, (char *)c->password);
     }
   }
 

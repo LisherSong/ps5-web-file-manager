@@ -3,7 +3,9 @@
  *   bench_extract <archive> <out-dir> [password]
  *
  * Reports how long the facade takes end to end -- decode, staging writes,
- * fsync, publish -- which is exactly what a PS5 user waits for. It is
+ * publish -- which is exactly what a PS5 user waits for. Note there is no
+ * fsync in the extract path at all (see the comment in zip_extract.c's
+ * publish_entry): the pipeline is "sync nothing, rename everything". It is
  * deliberately separate from the correctness drivers: those assert on bytes,
  * this one only prints numbers, and it is not part of the test matrix.
  *
@@ -97,13 +99,14 @@ main(int argc, char **argv) {
 #ifndef BENCH_NO_RAR
   if(!strcmp(format, "rar")) {
     status = rar_extract(archive, out_dir, ZIPX_CONFLICT_OVERWRITE,
-                         zipx_default_limits(), NULL, NULL, NULL, &result);
+                         zipx_default_limits(), NULL, NULL, NULL, NULL,
+                         &result);
   } else
 #endif
 #ifndef BENCH_SEVENZ_ONLY
   if(!strcmp(format, "zip")) {
     status = zipx_extract(archive, out_dir, ZIPX_CONFLICT_OVERWRITE,
-                          zipx_default_limits(), NULL, NULL, NULL, &result);
+                          zipx_default_limits(), NULL, NULL, NULL, NULL, &result);
   } else
 #endif
   {

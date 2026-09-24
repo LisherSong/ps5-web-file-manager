@@ -37,11 +37,10 @@
      * 7zAES (method 0x06F10701), the coder 7-Zip wraps around the streams when
        `-p` is used, driven from a caller supplied password
 
-   Not supported here (by design, see sz_chain_check):
-     * an encrypted *header* (`-mhe=on`): that is not a coder in a folder but a
-       second, encrypted copy of the archive header, which has to be decrypted
-       and parsed before any folder exists at all.  Reported by the SDK header
-       reader as SZ_ERROR_UNSUPPORTED, not by this module.
+   An encrypted *header* (`-mhe=on`) is not a coder in a folder: it is a second,
+   encrypted copy of the archive header that has to be decoded before any folder
+   exists at all.  src/sevenz_header.c does that -- by parsing that one folder's
+   descriptor and running it through this module, password and all.
 */
 
 #ifndef SEVENZ_CHAIN_H
