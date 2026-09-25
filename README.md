@@ -72,6 +72,7 @@ make linux && ./web-file-mgr-linux-v1.9.3M
 - **Copy and move** — the two-step, clipboard-style flow: select the sources,
   then paste (copy) or move them into the folder you browse to next. Conflict
   prompts appear for overwriting files and for merging folders.
+- **Rename** — rename one selected item in place.
 - **Delete** — recursive and permanent; there is no recycle bin.
 - **Create** — new folders and new empty text files.
 - **Multi-select** — copy, move, delete or tar-download many items in one go.
@@ -127,7 +128,9 @@ implemented inside this payload — no second file to install.
 - **Filenames survive mixed encodings** — names are transported as UTF-8 over
   the web API, but the payload also preserves the byte-oriented names returned
   by mounted filesystems, so a USB stick holding GBK names still displays and
-  operates correctly. (This is a fork fix; see [Notes](#notes).)
+  operates correctly. Upstream carries the same mechanism; what this fork adds
+  is that backend error messages decode too, so an entry name is not mangled at
+  the exact moment it matters most (see [Notes](#notes)).
 
 ## Archive support
 
@@ -463,8 +466,8 @@ decoders are vendored *into* the payload.
 
 | | Upstream | This fork |
 |---|---|---|
-| Extraction architecture | external `wfm-7zip-helper.elf` (~100 MB, distributed separately, fixed path `/data/wfm/`), driven over a Unix-socket IPC protocol | the engines live **inside the payload**; there is no second file and no IPC |
-| Deployment | two files; a missing/misplaced helper means extraction is dead (`archive_helper_not_running`) | one ELF, no external dependency |
+| Extraction architecture | external `wfm-7zip-helper.elf` (1,017,616 B, distributed separately, fixed path `/data/wfm/`), driven over a Unix-socket IPC protocol | the engines live **inside the payload**; there is no second file and no IPC |
+| Deployment | two files totalling 1,363,048 B; a missing or misplaced helper means extraction is dead (`archive_helper_not_running`) | one ELF of 903,448 B, no external dependency — **33.7% smaller**, and upstream's helper alone is larger than this entire payload |
 | Formats | ~30 extensions (`.tar`, `.gz`, `.xz`, `.bz2`, `.zst`, `.cab`, `.arj`, `.lzh`, `.cpio`, …) | `.zip` / `.rar` / `.7z` and their volume forms — three, each complete |
 | Zip-bomb and ratio defence | none | entry count, total size, per-file size, compression ratio, and a 1 GiB exemption so small files are not falsely flagged |
 | Disk-space pre-check | none | `statvfs` against the expanded total before staging |

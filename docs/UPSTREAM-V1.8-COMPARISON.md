@@ -22,7 +22,7 @@
 |---|---|---|
 | `src/archive_extract.c`（124 行） | 本仓库 | 只做**后缀识别** + 输出目录名推导 |
 | `src/archive_helper.c`（732 行） | 本仓库 | **IPC 客户端**：启动 helper + Unix socket 协议 |
-| `wfm-7zip-helper.elf`（~百 MB 级） | `/data/wfm/`，**不在仓库里，单独分发** | 真正的解压 = **7-Zip 本体** |
+| `wfm-7zip-helper.elf`（**实测 1,017,616 B ≈ 1 MB**） | `/data/wfm/`，**不在仓库里，单独分发** | 真正的解压 = **7-Zip 本体** |
 
 README 原文：
 
@@ -191,7 +191,7 @@ ZIP 108 + RAR 27 + 7z 28 = **163 checks**，0 失败（MinGW host）+ PS5 真机
 
 1. **部署体验倒退** —— 用户要装两个文件，还得记住放 `/data/wfm/`；丢一个功能全废。现在单 ELF 是无状态交付，这是真实优势
 2. **安全护栏会一起丢** —— 走 7-Zip 就意味着放弃我们对 entries/ratio/空间/穿越的控制
-3. **helper 上游自己都不敢放进仓库**（"separately distributed"），大概率是体积或许可原因，跟着走会继承同样的问题
+3. **helper 上游自己都不敢放进仓库**（"separately distributed"）。已实测它只有 **1,017,616 B ≈ 1 MB**（v1.9 release 资产），所以原因**不是体积**——更可能是许可（7-Zip 为 LGPL，其 unRAR 部分另带 "unRAR restriction"）与交叉编译成本，跟着走会继承同样的问题
 4. **我们已经付过的成本会沉没** —— 7z 引擎（自解析 folder + pull 链 + 7zAES）+ 三类分卷抽象共约 3,600 行零耦合代码
 
 ### 一句话总结
