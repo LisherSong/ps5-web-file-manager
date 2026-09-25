@@ -396,6 +396,64 @@ code the task overlay's existing password prompt already reacts to.
 
 - End-to-end validation of the built ELF on a real console.
 
+## [v1.9.2] — 2026-09-05
+
+**Version-string-only re-release: the tag now points at the tree that produced
+the published binary.**
+
+The `v1.9.1` tag sat four commits behind the tree its ELF was built from, so
+cloning that tag could not rebuild the published artifact. v1.9.2 is cut from
+the right commit. It is functionally identical to the v1.9.1 binary — the only
+source delta is the version literal itself (`VERSION_TAG` in the Makefile, plus
+the UI footer fallback in `assets/main.js`) — and the build is reproducible:
+reverting those two literals reproduces the v1.9.1 ELF byte for byte.
+
+Release artifact: `web-file-mgr-v1.9.2.elf` — 870 488 bytes (~850 KiB), sha256
+`177e90fecf93a0251e83f67884fba4551051be248330b0d70fda8ea732f88e84`.
+
+## [v1.9.1] — 2026-09-05
+
+**7z extraction — a third engine — plus a size and throughput pass.**
+
+Added:
+
+- `src/sevenz_extract.{c,h}` — the 7z engine, built on the LZMA SDK 26.03
+  decode subset plus the project's own pull-based codec chain
+  (`src/sevenz_chain.c`). The SDK's own `SzArEx` path only understands folders
+  of up to four coders, which cannot express BCJ2's five — hence the
+  self-parsed folder table and the pull-based chain. Dispatch is by extension
+  in `src/extract.c`; the three-phase model, the limit profiles and the
+  conflict policy are shared with ZIP and RAR, so `.7z` files get the same
+  **Extract** button as `.zip` and `.rar`.
+- `src/sevenz_volstream.{c,h}` — `.7z.001` / `.z01` byte-split volume sets,
+  stitched by name; open the first volume.
+- 7zAES content decryption (AES-256-CBC). The frontend asks for the password
+  *up front* here, so an unencrypted archive does not pay for a wasted scan.
+
+Performance (decode-only, no functional change):
+
+- LZMA SDK assembly decoder (`Asm/x86/LzmaDecOpt.asm` assembled with jwasm,
+  with an automatic pure-C fallback) ≈ 1.26×.
+- Single-coder pure-LZMA2 folders decode multi-threaded
+  (`Lzma2DecMt` via `src/sevenz_mt.c`, 8 threads) ≈ 1.37×.
+- The extract path drops its per-entry `fsync` — publish is rename-only and
+  there is no resume feature to protect (≥ 14× measured on an 8000-file
+  archive; see `docs/EXTRACTION-PERF.md`).
+
+Build and size:
+
+- `VERSION_TAG` v1.9.1. `src/demangle_stub.c` keeps libc++abi's Itanium name
+  demangler (105 KiB, reachable only from the uncaught-exception path) out of
+  the link, and `-Wl,--icf=all` folds identical functions: −15.8% overall with
+  no functional or throughput change, 1 017 864 B → 870 488 B. Measured in
+  `docs/SIZE-OPTIMIZATION.md`.
+
+Known gap at the time: 7z `-mhe=on` encrypted headers — closed in v1.9.3M with
+`src/sevenz_header.c`.
+
+Tests: **163 checks** (ZIP 108 + RAR 27 + 7z 28), 0 failures, plus a successful
+PS5 cross-compile.
+
 ## [v1.9] — 2026-09-05
 
 **RAR engine replaced: rarlab UnRAR 7.20.1 (v6 / multi-volume / decryption-capable).**
@@ -761,7 +819,9 @@ python3 .build/check-elf-gzip.py ./web-file-mgr.elf        # 7/7 v1.7 keys + 1 v
 A long-form technical write-up of this upgrade lives in
 [`docs/UPGRADE-v1.8-rar-support.md`](./docs/UPGRADE-v1.8-rar-support.md).
 The vendoring decision tree (and the v1.9 plan) is in
-[`third_party/unrar/VENDORED.md`](./third_party/unrar/VENDORED.md).
+[`third_party/unrar7/VENDORED.md`](./third_party/unrar7/VENDORED.md) — v1.8
+shipped it at `third_party/unrar/VENDORED.md`; the directory was renamed in
+v1.9 when the engine was replaced.
 
 ### Credits
 

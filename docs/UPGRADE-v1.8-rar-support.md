@@ -2,11 +2,12 @@
 
 > This is the long-form maintainer's manual for the v1.8 archive-engine
 > expansion. It is written for the next developer, not the user. The
-> user-facing description lives in [`README.md → RAR extraction`](../README.md#rar-extraction);
+> user-facing description lives in [`README.md → Archive support`](../README.md#archive-support);
 > the release notes are in [`CHANGELOG.md`](../CHANGELOG.md). The vendoring
 > decision tree (and the v1.9 upgrade path) is at
-> [`third_party/unrar/VENDORED.md`](../third_party/unrar/VENDORED.md) — most
-> of the "why" questions are answered there, not here.
+> [`third_party/unrar7/VENDORED.md`](../third_party/unrar7/VENDORED.md) — most
+> of the "why" questions are answered there, not here. (v1.8 shipped that file
+> as `third_party/unrar/VENDORED.md`; the directory was renamed in v1.9.)
 
 ---
 
@@ -54,7 +55,8 @@ in `third_party/unrar/`, add a CXX link step to `Makefile`, switch
 `src/rar_extract.c` to the `RAROpenArchiveEx` / `RARSetPassword` DLL
 API. **The `rar_extract()` signature, the dispatch layer and the host
 tests do not need to change.** Full step-by-step recipe is in
-[`third_party/unrar/VENDORED.md`](../third_party/unrar/VENDORED.md).
+[`third_party/unrar7/VENDORED.md`](../third_party/unrar7/VENDORED.md) (the v1.8
+original was `third_party/unrar/VENDORED.md`).
 
 ---
 
@@ -509,7 +511,7 @@ git -c core.autocrlf=false commit -m "v1.8: RAR4/RAR5 single-volume unencrypted 
 
 ### 10.1 v1.9 — full RAR (multi-volume + encrypted)
 
-See [`third_party/unrar/VENDORED.md`](../third_party/unrar/VENDORED.md)
+See [`third_party/unrar7/VENDORED.md`](../third_party/unrar7/VENDORED.md)
 §"Upgrading to a fuller library (v1.9 plan)" for the migration recipe.
 The public `rar_extract()` signature and the dispatch layer do **not**
 need to change; only:
