@@ -1,0 +1,48 @@
+  <script>
+  /* Offline fixture: every /api call the page makes is answered here. Injected
+     into a copy of index.html by .build/preview_build.py, just before the real
+     script tag, so the toolbar can be rendered without a console. */
+  (function () {
+    var now = Math.floor(Date.now() / 1000);
+    var dirs = {
+      "/": [
+        { name: "PPSA16608.zip", type: "-", mode: 420, size: 3980000000, mtime: now - 3600 },
+        { name: "\u6e38\u620f\u5907\u4efd.7z", type: "-", mode: 420, size: 12345678, mtime: now - 7200 },
+        { name: "saves", type: "d", mode: 493, size: 0, mtime: now - 86400 }
+      ]
+    };
+    function json(payload) {
+      return Promise.resolve(new Response(JSON.stringify(payload), {
+        status: 200, headers: { "Content-Type": "application/json" }
+      }));
+    }
+    window.fetch = function (url) {
+      var target = String(url);
+      var query = target.split("?")[1] || "";
+      var path = "/";
+      query.split("&").forEach(function (kv) {
+        var pair = kv.split("=");
+        if (pair[0] === "path") path = decodeURIComponent(pair[1] || "/");
+      });
+      if (target.indexOf("/api/list") === 0) {
+        var entries = (dirs[path] || []).map(function (entry) {
+          return Object.assign({}, entry, { path: (path === "/" ? "" : path) + "/" + entry.name });
+        });
+        return json({ ok: true, path: path, parent: "/", entries: entries });
+      }
+      if (target.indexOf("/api/tasks") === 0) {
+        return json({ ok: true, tasks: [], completion: null, now: now });
+      }
+      if (target.indexOf("/api/space") === 0) {
+        return json({ ok: true, mounts: [
+          { label_key: "storageRoot", path: "/", free: 812000000000, total: 2000000000000, current: true }
+        ] });
+      }
+      if (target.indexOf("/api/version") === 0) {
+        return json({ ok: true, version: "v1.9.3M", title_id: "FMGR88888" });
+      }
+      if (target.indexOf("/api/") === 0) return json({ ok: true });
+      return new Promise(function () {});
+    };
+  })();
+  </script>

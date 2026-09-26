@@ -6,9 +6,11 @@ gen/
 web-file-mgr-linux
 
 # Sandbox scratch under .build/: ignore the whole directory, then re-allow the
-# handful of files that are actually part of the repo (build scripts + the
-# ELF checker). A whitelist is the only thing that survives -- every debugging
-# session drops a new probe directory in here.
+# handful of files that are actually part of the repo -- the build scripts, the
+# ELF checker, and the validation harnesses. A whitelist is the only thing that
+# survives: every debugging session drops a new probe directory in here, and a
+# scratch-tree cleanup would otherwise delete the harnesses for good (they exist
+# nowhere else -- not in git, not on the release page).
 .build/*
 !.build/build-elf.sh
 !.build/build-elf-wsl.sh
@@ -16,6 +18,16 @@ web-file-mgr-linux
 !.build/check-elf-*.py
 !.build/extract-demo.html
 !.build/build-elf.log
+
+# Validation harnesses: headless-DOM unit tests against assets/main.js, the
+# real-page preview server and its Chromium pass, and the README / comparison
+# render checks. Run them before shipping a UI or docs change.
+!.build/ui_*_test.mjs
+!.build/preview_build.py
+!.build/preview_stub.html
+!.build/preview_check.mjs
+!.build/readme_header_render.mjs
+!.build/compare_*_check.mjs
 
 # Generated 7z fixtures (tests/make_sevenz_fixtures.py rebuilds them).
 tests/fixtures-7z/
