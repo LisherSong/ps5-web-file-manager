@@ -28,7 +28,7 @@ const r = await page.evaluate(() => ({
   body: document.body.textContent,
 }));
 check(!r.pageOverflow, "wide: no horizontal overflow");
-check(r.tables === 10, `10 tables present (${r.tables})`);
+check(r.tables === 13, `13 tables present (${r.tables})`);
 check(r.phases === 6, `6 phase cards present (${r.phases})`);
 check(r.bars.length === 12, `12 speed bars (${r.bars.length})`);
 // save-manager capability domain must survive edits (section 2-2 / 6 / 7-Phase5)
@@ -39,15 +39,33 @@ for (const key of ["garlic-savemgr", "/dev/pfsmgr", "sceFsMountSaveData", "存�
 for (const key of ["kstuff", "VoidShell", "elf-arsenal", "/proc/kstuff", "autoload.txt", "没安装过 etaHEN"]) {
   check(r.body.includes(key), `install-layer/competitor content present: ${key}`);
 }
-// the falsified assumption may only survive as a QUOTED correction, never as a live claim
-const stale = "事实标准就是 etaHEN";
-let idx = r.body.indexOf(stale), staleClaim = false;
-while (idx !== -1) {
-  const ctx = r.body.slice(Math.max(0, idx - 160), idx + 160);
-  if (!/作废|修正|已删除/.test(ctx)) staleClaim = true;
-  idx = r.body.indexOf(stale, idx + 1);
+// singleDPI / "extract DPI, don't depend on etaHEN" (2026-09-26 round 7). These pin the
+// load-bearing facts: the GPL-3.0 reuse right, the real AuthID, the three-part readiness
+// probe, and the MetaInfo 0x30 ABI correction. Losing any of them silently guts the plan.
+for (const key of [
+  "singleDPI", "ps5-direct-package-installer",
+  "GPL-3.0-or-later", "NOTICE",           // code may be reused, with attribution
+  "DEBUG_AUTHID", "0x4800000000000006",    // the AuthID that actually works (code, not docs)
+  "kernel_set_ucred_authid", "kernel_sys", // self-elevation we currently lack
+  "sceAppInstUtilGetInstallStatus",        // status polling we currently lack
+  "0x2700", "0x30", "is_playgo_enabled",   // MetaInfo 8-field -> 6-field correction
+  "Access-Control-Allow-Origin",           // DPI v2 is browser-reachable (no app needed)
+]) {
+  check(r.body.includes(key), `singleDPI content present: ${key}`);
 }
-check(!staleClaim, "no unqualified 'etaHEN is the de-facto HEN' claim survives");
+// falsified claims may only survive as QUOTED corrections, never as live claims
+const quotedOnly = (claim, allowRe, label) => {
+  let i = r.body.indexOf(claim), live = false;
+  while (i !== -1) {
+    const ctx = r.body.slice(Math.max(0, i - 160), i + 160);
+    if (!allowRe.test(ctx)) live = true;
+    i = r.body.indexOf(claim, i + 1);
+  }
+  check(!live, label);
+};
+quotedOnly("事实标准就是 etaHEN", /作废|修正|已删除/, "no unqualified 'etaHEN is the de-facto HEN' claim survives");
+quotedOnly("SDK 自动给", /收回|推翻|修正/, "no unqualified 'the SDK grants the permission' claim survives");
+check(r.body.includes("SDK 给不了"), "the corrected ShellCore-permission statement is present");
 console.log("     sections: " + r.h2.join(" | "));
 await page.screenshot({ path: OUT + "/proposal-wide.png", fullPage: true });
 await page.close();
