@@ -20,14 +20,15 @@ web-file-mgr-linux
 !.build/build-elf.log
 
 # Validation harnesses: headless-DOM unit tests against assets/main.js, the
-# real-page preview server and its Chromium pass, and the README / comparison
-# render checks. Run them before shipping a UI or docs change.
+# real-page preview server and its Chromium pass, and the README / comparison /
+# proposal render checks. Run them before shipping a UI or docs change.
 !.build/ui_*_test.mjs
 !.build/preview_build.py
 !.build/preview_stub.html
 !.build/preview_check.mjs
 !.build/readme_header_render.mjs
 !.build/compare_*_check.mjs
+!.build/proposal_check.mjs
 
 # Generated 7z fixtures (tests/make_sevenz_fixtures.py rebuilds them).
 tests/fixtures-7z/
