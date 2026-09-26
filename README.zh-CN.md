@@ -333,7 +333,8 @@ bash run-sevenz-tests.sh          # 7z 套件（需 MinGW gcc 与 7-Zip 二进�
 - **大档案档位** —— `medium_bomb.zip`（压缩比 ≈ 238）在默认档位下被拒、在大档案档位下通过
 - **格式分派** —— 改名的 ZIP 与垃圾数据块都会被拒
 
-三份前端 / 真页面验证脚本位于 `.build/`（开发期目录，不在 gitignore 白名单内）：
+三份前端 / 真页面验证脚本位于 `.build/` —— 该目录整体被 gitignore 忽略、只放行白名单，
+而这三份连同文档渲染检查脚本都在白名单内，因此它们受版本控制、清理临时文件时不会被误删：
 
 | 脚本 | 覆盖内容 | 检查数 |
 |---|---|---|
@@ -345,6 +346,7 @@ bash run-sevenz-tests.sh          # 7z 套件（需 MinGW gcc 与 7-Zip 二进�
 
 ```
 .
+├── .build/                       # 构建脚本 + 验证脚本（目录其余部分被 gitignore）
 ├── Makefile                      # PS5 + Linux 构建（VERSION_TAG v1.9.3M）
 ├── install-libmicrohttpd.sh      # 一次性依赖安装器
 ├── gen-asset-module.py           # 将 assets/* 内联为 gzip 压缩的 C 数组

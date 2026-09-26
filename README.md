@@ -392,8 +392,10 @@ cases**, 0 failures. Coverage:
   default caps and accepted under the large ones
 - **Format dispatch** — a renamed ZIP and a junk blob are both refused
 
-Three frontend/served-page harnesses live in `.build/` (a development-time
-directory, outside the gitignore whitelist):
+Three frontend/served-page harnesses live in `.build/` — a scratch directory
+that is gitignored apart from an explicit whitelist. These harnesses, together
+with the document render checks, are on that whitelist, so they are tracked in
+the repository and survive a scratch cleanup:
 
 | Script | Covers | Checks |
 |---|---|---|
@@ -405,6 +407,7 @@ directory, outside the gitignore whitelist):
 
 ```
 .
+├── .build/                       # build scripts + validation harnesses (rest of the dir is gitignored)
 ├── Makefile                      # PS5 + Linux builds (VERSION_TAG v1.9.3M)
 ├── install-libmicrohttpd.sh      # one-shot dependency installer
 ├── gen-asset-module.py           # embeds assets/* as gzip-compressed C arrays
