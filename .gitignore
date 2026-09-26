@@ -21,8 +21,12 @@ web-file-mgr-linux
 
 # Validation harnesses: headless-DOM unit tests against assets/main.js, the
 # real-page preview server and its Chromium pass, and the README / comparison /
-# proposal render checks. Run them before shipping a UI or docs change.
+# proposal / UI-demo render checks. Run them before shipping a UI or docs change.
+# ui_demos_check.mjs also turns the UI review criteria (overflow at three
+# breakpoints, WCAG-AA contrast, focus-ring containment, aria-disabled hygiene)
+# into assertions — they are invisible to the eye, so they need a test.
 !.build/ui_*_test.mjs
+!.build/ui_demos_check.mjs
 !.build/preview_build.py
 !.build/preview_stub.html
 !.build/preview_check.mjs
