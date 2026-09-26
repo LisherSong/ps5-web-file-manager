@@ -1,7 +1,7 @@
 // ============================================================
 //  UI 风格 demo 校验 + 截图 + 对比页生成
 //  跑法： node .build/ui_demos_check.mjs
-//  检查对象：工作区根的 ps5-ui-demo-{1..4}-*.html（这些 HTML 本身不入库）
+//  检查对象：工作区根的 ps5-ui-demo-{1..5}-*.html（这些 HTML 本身不入库）
 //
 //  为什么这个脚本值得存在：
 //   ① 溢出：transform 移出视口的抽屉会撑开 documentElement 滚动区，
@@ -23,7 +23,12 @@ const DEMOS = [
   { key: "demo2", file: "ps5-ui-demo-2-workbench.html", name: "风格 B · 双栏工作台" },
   { key: "demo3", file: "ps5-ui-demo-3-monitor.html",   name: "风格 C · 终端监控台" },
   { key: "demo4", file: "ps5-ui-demo-4-bento.html",     name: "风格 D · Bento 仪表盘" },
+  { key: "demo5", file: "ps5-ui-demo-5-harness.html",   name: "风格 E · Harness 开发者页" },
 ];
+
+// 备用主题方向：demo4 默认亮 → 切暗；demo5 默认暗（忠于站点）→ 切亮。
+// 两个方向都验，避免只测「亮→暗」一半。
+const ALT_THEME = { demo4: "dark", demo5: "light" };
 
 // 每个 demo 各自的对比度采样点：正文 / 次要文字 / 强调文字 / 有底色的提示条
 const CONTRAST_TARGETS = {
@@ -31,6 +36,9 @@ const CONTRAST_TARGETS = {
   demo2: [["h2", "标题"], [".rootbar", "路径条"], [".li .d", "行内次要"], [".bot", "底部状态条"], [".note.bad", "报错条"]],
   demo3: [["h2", "面板标题"], [".kv div", "键值（左右混排）"], [".log .m", "日志正文"], [".sub", "辅助文字"], [".tag.q", "标签"]],
   demo4: [["#sub", "副标题"], [".hero-stats span", "指标说明"], [".tile span", "卡片说明"], [".note.info", "信息条"], [".note.bad", "安全提示条"]],
+  // demo5 的采样点刻意跨了「页面底 / 卡片底 / 强调底」三种底色，
+  // 因为这套语言全靠近黑底 + 极低对比叠层，底色一变就容易掉出阈值。
+  demo5: [[".kicker", "大写分区标签"], ["#heroSub", "Hero 副标题"], [".card p", "卡片正文"], [".stats span", "指标说明"], [".note.info", "品牌色提示条"]],
 };
 
 let fails = 0;
@@ -163,21 +171,25 @@ for (const d of DEMOS) {
   });
   if (!dlg.skip) { check(dlg.on, "解压对话框可打开"); check(dlg.ov <= 1, `对话框打开后无横向溢出 (${dlg.ov}px)`); }
 
-  /* ---------- 截图 ---------- */
+  /* ---------- 截图 ----------
+     必须先滚回顶部：焦点那一组检查调用了 el.focus()，浏览器会自动把该行滚进视口，
+     于是长页 demo（风格 E）的「全页截图」拍到的是中段而不是首屏。 */
   await p.keyboard.press("Escape");
+  await p.evaluate(() => window.scrollTo(0, 0));
   await p.waitForTimeout(250);
   await p.screenshot({ path: `${OUT}/${d.key}-1920.jpg`, type: "jpeg", quality: 84 });
   shots[d.key] = `${OUT}/${d.key}-1920.jpg`;
-  if (d.key === "demo4") {   // 暗色主题：同布局只换 token，必须同样无溢出
-    const dark = await p.evaluate(() => {
+  if (ALT_THEME[d.key]) {   // 备用主题：同布局只换 token，必须同样无溢出
+    const mode = ALT_THEME[d.key];
+    const alt = await p.evaluate(m => {
       document.getElementById("btnTheme").click();
-      return { dark: document.body.classList.contains("dark"),
+      return { on: document.body.classList.contains(m),
                ov: document.documentElement.scrollWidth - document.documentElement.clientWidth };
-    });
-    check(dark.dark && dark.ov <= 1, `暗色主题切换正常且无溢出 (dark=${dark.dark} ov=${dark.ov}px)`);
+    }, mode);
+    check(alt.on && alt.ov <= 1, `备用主题（切到 ${mode}）正常且无溢出 (on=${alt.on} ov=${alt.ov}px)`);
     await p.waitForTimeout(350);
-    await p.screenshot({ path: `${OUT}/demo4-dark-1920.jpg`, type: "jpeg", quality: 84 });
-    shots["demo4-dark"] = `${OUT}/demo4-dark-1920.jpg`;
+    await p.screenshot({ path: `${OUT}/${d.key}-${mode}-1920.jpg`, type: "jpeg", quality: 84 });
+    shots[`${d.key}-${mode}`] = `${OUT}/${d.key}-${mode}-1920.jpg`;
   }
 
   /* ---------- 1280 电脑档 + 390 手机档：只验溢出 ---------- */
