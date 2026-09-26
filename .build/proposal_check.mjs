@@ -28,7 +28,12 @@ const r = await page.evaluate(() => ({
   body: document.body.textContent,
 }));
 check(!r.pageOverflow, "wide: no horizontal overflow");
-check(r.tables === 13, `13 tables present (${r.tables})`);
+check(r.tables === 14, `14 tables present (${r.tables})`);
+// the "package name" derivation spec must survive edits (2026-09-26 round 9): the new
+// subdir name strips the WHOLE archive suffix, so a target like …-app.rar/ must never return
+for (const key of ["剥掉的整段后缀", "整段后缀匹配", "part01.rar", "isRarSubVolume", "回退用完整文件名"]) {
+  check(r.body.includes(key), `subdir-name spec present: ${key}`);
+}
 check(r.phases === 6, `6 phase cards present (${r.phases})`);
 check(r.bars.length === 12, `12 speed bars (${r.bars.length})`);
 // save-manager capability domain must survive edits (section 2-2 / 6 / 7-Phase5)
@@ -66,6 +71,7 @@ const quotedOnly = (claim, allowRe, label) => {
 quotedOnly("事实标准就是 etaHEN", /作废|修正|已删除/, "no unqualified 'etaHEN is the de-facto HEN' claim survives");
 quotedOnly("SDK 自动给", /收回|推翻|修正/, "no unqualified 'the SDK grants the permission' claim survives");
 check(r.body.includes("SDK 给不了"), "the corrected ShellCore-permission statement is present");
+quotedOnly("-app.rar/", /指出|修正|原型里写成了/, "no live '…-app.rar/' subdir target survives");
 console.log("     sections: " + r.h2.join(" | "));
 await page.screenshot({ path: OUT + "/proposal-wide.png", fullPage: true });
 await page.close();

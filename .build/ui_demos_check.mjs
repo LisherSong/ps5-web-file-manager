@@ -82,6 +82,7 @@ for (const d of DEMOS) {
     hasLock: /单例|挂载中/.test(document.body.textContent),
     hasPick: /点选|选择落点|解压到/.test(document.body.textContent),
     hasSubdirDefault: /默认不勾/.test(document.body.textContent),
+    archiveExtAsDir: (document.body.textContent.match(/\.(zip|rar|7z)\//gi) || []).length,
     ariaDisabled: document.querySelectorAll('[aria-disabled="true"]').length,
     nativelyDisabledWithTitle: [...document.querySelectorAll('button[disabled][title]')].length,
     reducedMotion: /prefers-reduced-motion/.test(document.documentElement.outerHTML),
@@ -93,6 +94,7 @@ for (const d of DEMOS) {
   check(base.hasKstuff, "平台状态（kstuff）可见");
   check(base.hasAvg && base.hasLock, "进度口径（均速）+ 存档单例提示在场");
   check(base.hasPick && base.hasSubdirDefault, "解压落点点选 + 子目录默认不勾（已拍板）");
+  check(base.archiveExtAsDir === 0, `新建子目录名已去归档扩展名（.rar/ .zip/ .7z/ 命中 ${base.archiveExtAsDir} 次）`);
   check(base.ariaDisabled > 0, `存在 aria-disabled 禁用项 (${base.ariaDisabled})`);
   check(base.nativelyDisabledWithTitle === 0, "没有 button[disabled][title]（否则 title 永不弹出）");
   check(base.reducedMotion, "已处理 prefers-reduced-motion");
