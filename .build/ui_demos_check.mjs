@@ -9,6 +9,10 @@
 //   ② 对比度：fg3 #737b8c on #0e1014 = 4.43:1，低于 4.5 阈值 —— 肉眼看不出来。
 //   ③ 焦点环：密集列表里全局 outline 会压住邻行，必须验「行内 inset 环」。
 //   ④ 禁用按钮：button:disabled 带 pointer-events:none ⇒ title 永远弹不出来。
+//   ⑤ 宽度档不能只挑整数：1100 这种「不整不齐」的窗口宽度才是真实现场 ——
+//      风格 C 的顶栏正是在 1100 溢出 24px，而 1280 与 390 两档都给绿。
+//   ⑥ 命中区与视觉高度是两件事：控件可以只画 24px 高（风格 B/C 的底栏就这么高），
+//      但 PS5 是触摸板光标 ⇒ 命中区必须 ≥40px，得用 ::after 单独撑，断言也要单独量。
 // ============================================================
 import playwright from "file:///C:/Users/songl/.workbuddy/binaries/node/workspace/node_modules/playwright/index.js";
 import fs from "node:fs";
@@ -32,15 +36,15 @@ const ALT_THEME = { demo4: "dark", demo5: "light" };
 
 // 每个 demo 各自的对比度采样点：正文 / 次要文字 / 强调文字 / 有底色的提示条
 const CONTRAST_TARGETS = {
-  demo1: [["h1", "大标题"], [".crumb", "次要说明"], [".row .meta", "行内数字"], [".chip", "状态胶囊"], [".banner", "提示条"]],
-  demo2: [["h2", "标题"], [".rootbar", "路径条"], [".li .d", "行内次要"], [".bot", "底部状态条"], [".note.bad", "报错条"]],
-  demo3: [["h2", "面板标题"], [".kv div", "键值（左右混排）"], [".log .m", "日志正文"], [".sub", "辅助文字"], [".tag.q", "标签"]],
-  demo4: [["#sub", "副标题"], [".hero-stats span", "指标说明"], [".tile span", "卡片说明"], [".note.info", "信息条"], [".note.bad", "安全提示条"]],
+  demo1: [["h1", "大标题"], [".crumb", "次要说明"], [".row .meta", "行内数字"], [".chip", "状态胶囊"], [".banner", "提示条"], [".ipchip .ipv", "本机地址"]],
+  demo2: [["h2", "标题"], [".rootbar", "路径条"], [".li .d", "行内次要"], [".bot", "底部状态条"], [".note.bad", "报错条"], [".ipchip .ipv", "本机地址"]],
+  demo3: [["h2", "面板标题"], [".kv div", "键值（左右混排）"], [".log .m", "日志正文"], [".sub", "辅助文字"], [".tag.q", "标签"], [".ipchip .ipv", "本机地址"]],
+  demo4: [["#sub", "副标题"], [".hero-stats span", "指标说明"], [".tile span", "卡片说明"], [".note.info", "信息条"], [".note.bad", "安全提示条"], [".ipchip .ipv", "本机地址"]],
   // demo5 的采样点刻意跨了「页面底 / 卡片底 / 强调底」三种底色，
   // 因为这套语言全靠近黑底 + 极低对比叠层，底色一变就容易掉出阈值。
-  // ⚠️ 五处全部落在**默认视图**内：视图化之后其余视图是 display:none，
+  // ⚠️ 六处全部落在**默认视图**内：视图化之后其余视图是 display:none，
   //    getComputedStyle 仍读得出颜色，但「量一个看不见的元素」没有意义。
-  demo5: [[".kicker", "大写分区标签"], ["#heroSub", "Hero 副标题"], [".card p", "卡片正文"], [".facts .pill.n", "状态胶囊"], [".note.info", "品牌色提示条"]],
+  demo5: [[".kicker", "大写分区标签"], ["#heroSub", "Hero 副标题"], [".card p", "卡片正文"], [".facts .pill.n", "状态胶囊"], [".note.info", "品牌色提示条"], [".ipchip .ipv", "本机地址"]],
 };
 
 let fails = 0;
@@ -164,6 +168,18 @@ for (const d of DEMOS) {
     reducedMotion: /prefers-reduced-motion/.test(document.documentElement.outerHTML),
     svgIcons: document.querySelectorAll("svg.i").length,
     emoji: (document.body.textContent.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) || []).length,
+    /* 本机地址：命中区要单独量 —— 视觉高度是按风格定的（24~37px 不等），
+       命中区一律靠 ::after 撑到 40px。只量 getBoundingClientRect 会把
+       「看着小但点得中」误判成不合格。 */
+    ip: (() => {
+      const c = document.getElementById("ipChip");
+      if (!c) return { text: "", hit: 0 };
+      const v = c.querySelector(".ipv");
+      const after = getComputedStyle(c, "::after");
+      return { text: v ? v.textContent.trim() : "",
+               hit: Math.round(Math.max(c.getBoundingClientRect().height,
+                                        parseFloat(after.height) || 0)) };
+    })(),
   }));
   check(base.ov <= 1, `1920 无页面横向溢出 (${base.ov}px)`);
   check(base.hasNav, "四个一级导航项齐全（文件/任务/游戏/存档）");
@@ -177,14 +193,45 @@ for (const d of DEMOS) {
   check(base.svgIcons >= 6, `图标为内联 SVG 而非 emoji (${base.svgIcons} 个)`);
   check(base.emoji === 0, `正文无 emoji (${base.emoji})`);
 
+  /* ---------- 本机地址（2026-09-27 加） ----------
+     它不是装饰件：插件跑在 PS5 上就是个 HTTP 服务，而这个地址是「用电脑 / 手机
+     打开同一个界面」的唯一入口，偏偏 PS5 自己没有 ipconfig —— 界面不给就无处可查。
+     端口来自服务端上报（默认 8888，被占用会顺延），所以这里只要求「像 IP:PORT」，
+     不锁死 8888；锁死了反而会把一个真实的运行时行为挡住。 */
+  check(/^\d{1,3}(\.\d{1,3}){3}:\d{2,5}$/.test(base.ip.text),
+        `本机地址形如 IP:PORT（${base.ip.text || "缺失"}）`);
+  check(!!base.ip.text && !/^(127\.|0\.0\.0\.0)/.test(base.ip.text),
+        "地址是局域网地址而不是回环（回环对「用另一台设备打开」没有意义）");
+  check(base.ip.hit >= 40, `本机地址可点区域 ≥40px（${base.ip.hit}px，PS5 是触摸板光标）`);
+
   /* ---------- 本次改动的回归钉 ---------- */
   const extras = EXTRA[d.key] || [];
   if (extras.length) {
-    const got = await p.evaluate(srcs => srcs.map(s => {
-      try { return !!(new Function("return (" + s + ")")())(); } catch (e) { return false; }
-    }), extras.map(e => e[1]));
+    /* ⚠️ 逐个 await：回归钉里有的检查必须等一个 tick（例：点了复制按钮之后
+       DOM 才会显示「已复制」）。同步版只能拿到点击瞬间的状态，会把真功能判成假按钮。 */
+    const got = await p.evaluate(async srcs => Promise.all(srcs.map(async s => {
+      try { return !!(await (new Function("return (" + s + ")")())()); } catch (e) { return false; }
+    })), extras.map(e => e[1]));
     extras.forEach((e, i) => check(got[i], e[0]));
   }
+
+  /* ---------- 本机地址：点一下必须真的有反应 ----------
+     「点击复制」是本轮最容易做成假交互的地方：按钮看着是按钮，按下去什么都没发生，
+     断言却只验了「元素存在」。这里验三件事：有可见反馈、反馈会复原、按钮不是死的。
+     ⚠️ 两条路径都失败时文案是「复制失败…」，仍然算有反馈 —— 因为「静默无反应」才是
+     真正要防的那种 bug；headless 下能不能写进系统剪贴板本来就不该由页面决定。 */
+  const ipClick = await p.evaluate(async () => {
+    const c = document.getElementById("ipChip");
+    if (!c) return { ok: false, restored: false, why: "找不到 #ipChip" };
+    const v = c.querySelector(".ipv"), before = v.textContent;
+    c.click();
+    await new Promise(r => setTimeout(r, 700));
+    const after = v.textContent, marked = c.hasAttribute("data-copied");
+    await new Promise(r => setTimeout(r, 1000));   // 等复原：长留会把地址本身盖住，截图也拍错
+    return { ok: after !== before, restored: v.textContent === before, why: after };
+  });
+  check(ipClick.ok, `本机地址点一下有可见反馈（显示「${ipClick.why}」）`);
+  check(ipClick.restored, "复制提示 1.5s 后自动复原（否则地址会被提示文案长期盖掉）");
 
   /* ---------- 视图化页面：逐视图量溢出 ---------- */
   const vw = await widestOverflow(p);
@@ -298,17 +345,23 @@ for (const d of DEMOS) {
     const mode = ALT_THEME[d.key];
     const alt = await p.evaluate(m => {
       document.getElementById("btnTheme").click();
+      /* 备用主题下单独再量一次地址文字：它吃的是 --fg2 / --fg3 这类**主题令牌**，
+         换一套色值就可能掉出阈值，而上面那一组采样只发生在默认主题。 */
+      const el = document.querySelector(".ipchip .ipv");
+      const cs = el ? getComputedStyle(el) : null;
       return { on: document.body.classList.contains(m),
-               ov: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+               ov: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+               ip: el ? +window.__ratio(window.__parse(cs.color), window.__bg(el)).toFixed(2) : 0 };
     }, mode);
     check(alt.on && alt.ov <= 1, `备用主题（切到 ${mode}）正常且无溢出 (on=${alt.on} ov=${alt.ov}px)`);
+    check(alt.ip >= 4.5, `备用主题（${mode}）下本机地址仍可读 (${alt.ip}:1)`);
     await p.waitForTimeout(350);
     await p.screenshot({ path: `${OUT}/${d.key}-${mode}-1920.jpg`, type: "jpeg", quality: 84 });
     shots[`${d.key}-${mode}`] = `${OUT}/${d.key}-${mode}-1920.jpg`;
   }
 
-  /* ---------- 1280 电脑档 + 390 手机档：只验溢出 ---------- */
-  for (const [w, h, tag] of [[1280, 820, "1280"], [390, 844, "390"]]) {
+  /* ---------- 1280 电脑档 + 1100 窄窗档 + 390 手机档：只验溢出 ---------- */
+  for (const [w, h, tag] of [[1280, 820, "1280"], [1100, 800, "1100"], [390, 844, "390"]]) {
     const q = await browser.newPage({ viewport: { width: w, height: h } });
     await q.goto(url, { waitUntil: "load" });
     await q.waitForTimeout(300);
@@ -335,15 +388,26 @@ for (const d of DEMOS) {
     const de = document.documentElement;
     const bs = [...document.querySelectorAll("button[data-view]")];
     const rects = bs.map(b => b.getBoundingClientRect());
+    const ipc = document.getElementById("ipChip");
+    const ir = ipc ? ipc.getBoundingClientRect() : null;
     return {
       ov: de.scrollWidth - de.clientWidth,
       n: bs.length,
       rows: new Set(rects.map(r => Math.round(r.top))).size,
       top: rects.length ? Math.min(...rects.map(r => r.top)) : -1,
       bottom: rects.length ? Math.max(...rects.map(r => r.bottom)) : -1,
+      ipTop: ir ? Math.round(ir.top) : null,
+      ipBottom: ir ? Math.round(ir.bottom) : null,
+      ipW: ir ? Math.round(ir.width) : 0,
     };
   });
   check(ps5.ov <= 1, `PS5 1920×970 无横向溢出 (${ps5.ov}px)`);
+  /* 地址在 PS5 档必须可见且落在首屏里。
+     1920 宽下它**不该**被任何响应式规则藏起来（风格 A 只在 ≤900px 才让位给导航），
+     所以这里不给 SKIP 分支：查不到就是真失败。 */
+  check(ps5.ipW > 0, "PS5 档本机地址可见（1920 宽下不该被响应式规则藏起来）");
+  check(ps5.ipW > 0 && ps5.ipTop >= 0 && ps5.ipBottom <= 970,
+        `PS5 档本机地址在首屏内（top=${ps5.ipTop} bottom=${ps5.ipBottom}）`);
   /* 只有「视图化」页面（带 data-view 导航）才验「导航置顶且单行」。
      风格 B/C/D 是单页长滚动、压根没有一级导航 —— 硬套只会造出假失败，
      而假失败和假通过一样有毒：它会让人开始忽略这一组断言。 */

@@ -112,6 +112,24 @@ for (const key of [
 ]) {
   check(r.body.includes(key), `UI rule content present: ${key}`);
 }
+// local-address rule (2026-09-27 round 10). The address is a FUNCTIONAL entry point
+// (how you open this same UI from a PC/phone), not decoration — and PS5 has no
+// `ipconfig`, so the UI is the only place it can come from. These keys pin the two
+// implementation constraints that are easy to "simplify away" later and would then be
+// quietly wrong: the port is probed at runtime, and clipboard is unavailable over plain
+// http on a LAN IP.
+for (const key of [
+  "本机地址",                 // the rule itself
+  "find_available_port",      // the port is NOT a constant (8888 gets bumped)
+  "navigator.clipboard",      // the API that does not exist in this deployment
+  "execCommand",              // ...so the fallback must stay
+  "局域网地址而非回环",        // 127.0.0.1 is useless on the OTHER device
+  "::after",                  // hit area is expanded separately from visual height
+  "IP:PORT",                  // the accepted shape
+  "209 项",                   // the acceptance count this round reached
+]) {
+  check(r.body.includes(key), `local-address rule present: ${key}`);
+}
 // the install-layer AuthID was mis-stated in section 6 until this round; it may only
 // survive as a quoted correction, never as a live claim
 quotedOnly("0x3800000000000010", /0 命中|作废|误记|误写|上一轮/, "no live '0x3800000000000010' AuthID survives");
