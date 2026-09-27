@@ -38,7 +38,9 @@ const CONTRAST_TARGETS = {
   demo4: [["#sub", "副标题"], [".hero-stats span", "指标说明"], [".tile span", "卡片说明"], [".note.info", "信息条"], [".note.bad", "安全提示条"]],
   // demo5 的采样点刻意跨了「页面底 / 卡片底 / 强调底」三种底色，
   // 因为这套语言全靠近黑底 + 极低对比叠层，底色一变就容易掉出阈值。
-  demo5: [[".kicker", "大写分区标签"], ["#heroSub", "Hero 副标题"], [".card p", "卡片正文"], [".stats span", "指标说明"], [".note.info", "品牌色提示条"]],
+  // ⚠️ 五处全部落在**默认视图**内：视图化之后其余视图是 display:none，
+  //    getComputedStyle 仍读得出颜色，但「量一个看不见的元素」没有意义。
+  demo5: [[".kicker", "大写分区标签"], ["#heroSub", "Hero 副标题"], [".card p", "卡片正文"], [".facts .pill.n", "状态胶囊"], [".note.info", "品牌色提示条"]],
 };
 
 let fails = 0;
@@ -64,6 +66,31 @@ window.__parse = s => { const m = s.match(/rgba?\\(([^)]+)\\)/); return m ? m[1]
 `;
 
 const shots = {};
+
+/* ---------- 视图化页面的逐视图溢出测量 ----------
+   风格 A 与 E 把内容分成若干互斥的 .view 容器（隐藏的那个是 display:none）。
+   隐藏视图不贡献宽度 ⇒ 只量默认视图等于对其它视图「不设防」：溢出要等用户
+   亲手点进去才暴露。这里逐个切过去量，并且把「有没有切成功」也验一遍 ——
+   否则导航一旦失效（风格 E 第一版就是：按钮只换高亮、不换内容），
+   「5 个视图都无溢出」这句话会在同一个视图上量五遍，变成静默假绿。 */
+async function widestOverflow(page) {
+  const views = await page.evaluate(() => [...document.querySelectorAll("button[data-view]")].map(b => b.dataset.view));
+  if (views.length < 2) return null;
+  let worst = -1, at = "", switched = true;
+  for (const k of views) {
+    const r = await page.evaluate(key => {
+      const b = document.querySelector(`button[data-view="${key}"]`);
+      if (b) b.click();
+      const on = document.querySelector(".view.on");
+      const de = document.documentElement;
+      return { ov: de.scrollWidth - de.clientWidth, on: on ? on.id : "?", ok: on ? on.id === "view-" + key : false };
+    }, k);
+    if (!r.ok) switched = false;
+    if (r.ov > worst) { worst = r.ov; at = r.on; }
+  }
+  await page.evaluate(() => document.querySelector("button[data-view]")?.click());   // 切回默认视图
+  return { n: views.length, worst, at, switched };
+}
 
 for (const d of DEMOS) {
   const url = "file:///" + ROOT + "/" + d.file;
@@ -109,6 +136,13 @@ for (const d of DEMOS) {
   check(base.svgIcons >= 6, `图标为内联 SVG 而非 emoji (${base.svgIcons} 个)`);
   check(base.emoji === 0, `正文无 emoji (${base.emoji})`);
 
+  /* ---------- 视图化页面：逐视图量溢出 ---------- */
+  const vw = await widestOverflow(p);
+  if (vw) {
+    check(vw.switched, `导航真能切换视图（${vw.n} 个视图逐个点过）`);
+    check(vw.worst <= 1, `1920 · ${vw.n} 个视图切换后均无横向溢出 (最大 ${vw.worst}px @ ${vw.at})`);
+  }
+
   /* ---------- 对比度 ---------- */
   const cr = await p.evaluate(targets => targets.map(([sel, label]) => {
     const el = document.querySelector(sel);
@@ -124,9 +158,23 @@ for (const d of DEMOS) {
     check(c.ratio >= c.min, `对比度 ${c.label} ${c.ratio}:1 (需 ≥${c.min}, ${c.size}px)`);
   }
 
-  /* ---------- 焦点环：必须是「不越出容器」的行内环 ---------- */
+  /* ---------- 焦点环：必须是「不越出容器」的行内环 ----------
+     视图化页面（风格 E）的默认视图里可能根本没有可聚焦的行 —— 那样这组检查会
+     落到导航按钮上，等于把「行内 inset 环」这条约定静默跳过。先切到第一个含行
+     的视图；测完再切回来（1920 截图必须拍默认视图）。 */
+  const focusedView = await p.evaluate(() => {
+    const btns = [...document.querySelectorAll("button[data-view]")];
+    if (btns.length < 2) return false;
+    const t = btns.find(b => {
+      const v = document.querySelector("#view-" + b.dataset.view);
+      return v && v.querySelector(".row[tabindex], .li[tabindex], .lr[tabindex]");
+    });
+    if (!t) return false;
+    t.click();
+    return true;
+  });
   const foc = await p.evaluate(() => {
-    // 只挑「当前可见」的候选 —— 默认视图之外的隐藏列表聚焦不上，
+    // 只挑「当前可见」的候选 —— 隐藏视图里的列表聚焦不上，
     // 会给出 outline=0 shadow=0 的假失败（demo4 默认是总览视图，踩过）。
     const vis = el => el && el.offsetParent !== null && el.getClientRects().length > 0;
     const sel = [".row[tabindex]", ".li[tabindex]", ".lr[tabindex]", ".tabs button", ".seg button", ".nav button"]
@@ -175,10 +223,27 @@ for (const d of DEMOS) {
      必须先滚回顶部：焦点那一组检查调用了 el.focus()，浏览器会自动把该行滚进视口，
      于是长页 demo（风格 E）的「全页截图」拍到的是中段而不是首屏。 */
   await p.keyboard.press("Escape");
+  if (focusedView) await p.evaluate(() => document.querySelector("button[data-view]")?.click());   // 切回默认视图再拍
   await p.evaluate(() => window.scrollTo(0, 0));
   await p.waitForTimeout(250);
   await p.screenshot({ path: `${OUT}/${d.key}-1920.jpg`, type: "jpeg", quality: 84 });
   shots[d.key] = `${OUT}/${d.key}-1920.jpg`;
+  /* 视图化页面再拍一张「第二个视图」：默认视图（概览 / 落地页）看起来仍像宣传页，
+     真正证明「这是工具界面」的是工作视图那一张。 */
+  if (vw) {
+    const second = await p.evaluate(() => {
+      const bs = [...document.querySelectorAll("button[data-view]")];
+      if (!bs[1]) return null;
+      bs[1].click(); window.scrollTo(0, 0);
+      return document.querySelector(".view.on")?.id || null;
+    });
+    if (second) {
+      await p.waitForTimeout(320);
+      await p.screenshot({ path: `${OUT}/${d.key}-2nd-1920.jpg`, type: "jpeg", quality: 84 });
+      shots[`${d.key}-2nd`] = `${OUT}/${d.key}-2nd-1920.jpg`;
+      await p.evaluate(() => document.querySelector("button[data-view]")?.click());
+    }
+  }
   if (ALT_THEME[d.key]) {   // 备用主题：同布局只换 token，必须同样无溢出
     const mode = ALT_THEME[d.key];
     const alt = await p.evaluate(m => {
@@ -198,7 +263,10 @@ for (const d of DEMOS) {
     await q.goto(url, { waitUntil: "load" });
     await q.waitForTimeout(300);
     const o = await q.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    check(o <= 1, `${tag} 无横向溢出 (${o}px)`);
+    const vq = await widestOverflow(q);
+    if (vq) check(vq.worst <= 1, `${tag} · ${vq.n} 个视图逐个切换后均无横向溢出 (最大 ${vq.worst}px @ ${vq.at})`);
+    else check(o <= 1, `${tag} 无横向溢出 (${o}px)`);
+    await q.evaluate(() => window.scrollTo(0, 0));
     if (w === 390) {
       await q.screenshot({ path: `${OUT}/${d.key}-390.jpg`, type: "jpeg", quality: 80 });
       shots[d.key + "-390"] = `${OUT}/${d.key}-390.jpg`;
