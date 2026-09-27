@@ -25,10 +25,19 @@ const r = await page.evaluate(() => ({
   phases: document.querySelectorAll(".phase").length,
   h2: [...document.querySelectorAll("h2")].map(h => h.textContent.trim()),
   bars: [...document.querySelectorAll(".speedbar .bar")].map(b => b.style.width),
+  widestTable: Math.max(0, ...[...document.querySelectorAll("table")].map(t => Math.round(t.getBoundingClientRect().width))),
   body: document.body.textContent,
 }));
 check(!r.pageOverflow, "wide: no horizontal overflow");
-check(r.tables === 14, `14 tables present (${r.tables})`);
+// Named, so the failure message points at the root cause instead of "page overflows".
+// TRAP (hit 2026-09-27): the stylesheet has a global `td:first-child{white-space:nowrap}`.
+// A wide table's first cell is therefore pinned to one line, and a `td[colspan]` full of
+// prose counts as `:first-child` too — one such row pushed a table to 2085px inside a
+// 912px column, which is a 2265px single line. Fix by removing the conflict (move prose
+// out of the table / use <br>), NOT by raising specificity or adding nowrap overrides.
+const WRAP = 960;   // .wrap{max-width:960px}
+check(r.widestTable <= WRAP, `no table exceeds the 960px content column (widest ${r.widestTable}px)`);
+check(r.tables === 15, `15 tables present (${r.tables})`);
 // the "package name" derivation spec must survive edits (2026-09-26 round 9): the new
 // subdir name strips the WHOLE archive suffix, so a target like …-app.rar/ must never return
 for (const key of ["剥掉的整段后缀", "整段后缀匹配", "part01.rar", "isRarSubVolume", "回退用完整文件名"]) {
@@ -72,6 +81,25 @@ quotedOnly("事实标准就是 etaHEN", /作废|修正|已删除/, "no unqualifi
 quotedOnly("SDK 自动给", /收回|推翻|修正/, "no unqualified 'the SDK grants the permission' claim survives");
 check(r.body.includes("SDK 给不了"), "the corrected ShellCore-permission statement is present");
 quotedOnly("-app.rar/", /指出|修正|原型里写成了/, "no live '…-app.rar/' subdir target survives");
+// save-writeback safety (2026-09-27 round 8): "forced snapshot before write-back" was
+// verified to be a Vacuum — enumerate the implementation set by fingerprinting the one
+// system call every write-back must use, then read each write path. These keys keep the
+// differentiator and its evidence alive; losing them silently downgrades us to
+// "another save manager", which is exactly what the plan decided not to be.
+for (const key of [
+  "写回前强制留快照",              // the question this round answered
+  "sceFsCreatePfsSaveDataImage",   // the fingerprint used to enumerate implementations
+  "savescum", "apollo-ps4",        // the two closest competitors: both non-forcing
+  "O_TRUNC",                       // garlic's in-place truncating write-back
+  "save_periodic_cleanup",         // the cleanup that deletes garlic's own copy
+  "/data/savesnap/",               // where OUR snapshots must live (independent dir)
+  "强制且不可跳过", "失败自动回滚",  // the two load-bearing hard rules
+]) {
+  check(r.body.includes(key), `save-writeback content present: ${key}`);
+}
+// the install-layer AuthID was mis-stated in section 6 until this round; it may only
+// survive as a quoted correction, never as a live claim
+quotedOnly("0x3800000000000010", /0 命中|作废|误记|误写|上一轮/, "no live '0x3800000000000010' AuthID survives");
 console.log("     sections: " + r.h2.join(" | "));
 await page.screenshot({ path: OUT + "/proposal-wide.png", fullPage: true });
 await page.close();
