@@ -45,6 +45,47 @@ const CONTRAST_TARGETS = {
 
 let fails = 0;
 const check = (ok, name) => { console.log((ok ? "  PASS  " : "  FAIL  ") + name); if (!ok) fails++; };
+/* 逐 demo 的回归钉：只验「这个 demo 该有的东西」，不硬套到别的 demo 上。
+   ⚠️ 必须是**字符串形式**的箭头函数：playwright 的 evaluate 只会序列化普通值，
+   把函数数组直接当参数传，会在序列化阶段就抛
+   "Attempting to serialize unexpected value"（本次真踩过）。 */
+const EXTRA = {
+  demo1: [
+    ["导航改到顶部后触控目标仍 ≥44px（PS5 用触摸板光标）",
+     `() => [...document.querySelectorAll(".nav button")].every(b => b.getBoundingClientRect().height >= 44)`],
+    ["导航不再产生左侧竖栏（横向空间全让给内容）",
+     `() => { const r = document.querySelector("nav").getBoundingClientRect();
+        return r.width > 900 && r.height <= 80; }`],
+  ],
+  demo5: [
+    ["游戏页有封面网格（≥6 张封面）",
+     `() => document.querySelectorAll("#view-library .gcard .cover").length >= 6`],
+    ["封面有「抽不到 icon0.png」的回退态（一排卡片里不留空洞）",
+     `() => !!document.querySelector("#view-library .cover.fb")`],
+    ["封面有加密锁定态（需要口令的包也得有封面）",
+     `() => !!document.querySelector("#view-library .cover.locked")`],
+    ["筛选控件真会筛，不是只换按下态",
+     `() => { const s = document.getElementById("view-library");
+        const segs = s.querySelectorAll(".seg"); if (segs.length < 2) return false;
+        const vis = () => [...s.querySelectorAll(".gcard")].filter(c => !c.hidden).length;
+        const before = vis();
+        segs[1].querySelectorAll("button")[2].click();   // 需口令
+        const after = vis();
+        segs[1].querySelectorAll("button")[0].click();   // 切回「在盘上」
+        return before === 6 && after === 1 && vis() === 6; }`],
+    ["存档页有快照列（这是要卖的差异化，必须看得见）",
+     `() => /快照/.test((document.getElementById("view-saves") || {}).textContent || "")`],
+    ["存档页有操作日志终端（借自 Garlic 的 TERMINAL 面板）",
+     `() => !!document.querySelector("#view-saves .console .lines li")`],
+    ["存档页空状态可来回切换（空态不是留白，是真会出现的状态）",
+     `() => { const d = document.getElementById("svDetail"), e = document.getElementById("svEmpty"),
+                 c = document.getElementById("svClose"), it = document.querySelector("#view-saves .svi");
+        if (!d || !e || !c || !it) return false;
+        c.click();  const a = d.hidden === true  && e.hidden === false;
+        it.click(); const b = d.hidden === false && e.hidden === true;
+        return a && b; }`],
+  ],
+};
 
 const browser = await playwright.chromium.launch();
 
@@ -135,6 +176,15 @@ for (const d of DEMOS) {
   check(base.reducedMotion, "已处理 prefers-reduced-motion");
   check(base.svgIcons >= 6, `图标为内联 SVG 而非 emoji (${base.svgIcons} 个)`);
   check(base.emoji === 0, `正文无 emoji (${base.emoji})`);
+
+  /* ---------- 本次改动的回归钉 ---------- */
+  const extras = EXTRA[d.key] || [];
+  if (extras.length) {
+    const got = await p.evaluate(srcs => srcs.map(s => {
+      try { return !!(new Function("return (" + s + ")")())(); } catch (e) { return false; }
+    }), extras.map(e => e[1]));
+    extras.forEach((e, i) => check(got[i], e[0]));
+  }
 
   /* ---------- 视图化页面：逐视图量溢出 ---------- */
   const vw = await widestOverflow(p);
@@ -273,6 +323,41 @@ for (const d of DEMOS) {
     }
     await q.close();
   }
+  /* ---------- PS5 档：1920×970 ----------
+     PS5 的浏览器自己不把 1080 全留给页面，可视区形状是「横向充裕、纵向紧缺」。
+     1080×1920 那一轮抓不到这个形状特有的问题，所以单独补一档：
+       ① 一级导航必须停在顶部并且**单行** —— 折行等于白吃纵向空间；
+       ② 导航必须在首屏内（吸顶或至少在顶部），滚一次就找不到了等于没有导航。 */
+  const ps5p = await browser.newPage({ viewport: { width: 1920, height: 970 } });
+  await ps5p.goto(url, { waitUntil: "load" });
+  await ps5p.waitForTimeout(320);
+  const ps5 = await ps5p.evaluate(() => {
+    const de = document.documentElement;
+    const bs = [...document.querySelectorAll("button[data-view]")];
+    const rects = bs.map(b => b.getBoundingClientRect());
+    return {
+      ov: de.scrollWidth - de.clientWidth,
+      n: bs.length,
+      rows: new Set(rects.map(r => Math.round(r.top))).size,
+      top: rects.length ? Math.min(...rects.map(r => r.top)) : -1,
+      bottom: rects.length ? Math.max(...rects.map(r => r.bottom)) : -1,
+    };
+  });
+  check(ps5.ov <= 1, `PS5 1920×970 无横向溢出 (${ps5.ov}px)`);
+  /* 只有「视图化」页面（带 data-view 导航）才验「导航置顶且单行」。
+     风格 B/C/D 是单页长滚动、压根没有一级导航 —— 硬套只会造出假失败，
+     而假失败和假通过一样有毒：它会让人开始忽略这一组断言。 */
+  if (ps5.n >= 2) {
+    check(ps5.n >= 4 && ps5.rows === 1, `PS5 档一级导航单行不折行（${ps5.n} 项 / ${ps5.rows} 行）`);
+    check(ps5.top >= 0 && ps5.bottom > 0 && ps5.bottom <= 970,
+          `PS5 档导航在首屏顶部（top=${Math.round(ps5.top)}px bottom=${Math.round(ps5.bottom)}px）`);
+  } else {
+    console.log("  SKIP  PS5 档导航检查（此 demo 无一级导航，是单页长滚动）");
+  }
+  const pvq = await widestOverflow(ps5p);
+  if (pvq) check(pvq.worst <= 1, `PS5 档 ${pvq.n} 个视图逐个切换后均无横向溢出 (最大 ${pvq.worst}px @ ${pvq.at})`);
+  await ps5p.close();
+
   await p.close();
 }
 

@@ -97,6 +97,21 @@ for (const key of [
 ]) {
   check(r.body.includes(key), `save-writeback content present: ${key}`);
 }
+// UI hard rules (2026-09-27 round 9). PS5's viewport SHAPE (wide, short) is what forces
+// the top nav — not taste. And the library cover must come from INSIDE the pkg, not from
+// a scraper. Lose these and the decisions the user already made get re-litigated.
+for (const key of [
+  "kstuff 启动",            // the status wording the user picked (was "在位")
+  "1920×970",              // the PS5 viewport shape that forces the top nav
+  "顶部单行吸顶",           // nav placement rule
+  "sce_sys/icon0.png",     // where covers actually come from
+  ".covers/",              // the runtime cover cache
+  "抽不到必须回退",         // no blank holes in the cover grid
+  "底部操作日志终端",       // the Garlic-derived save-page skeleton
+  "Decrypt / Encrypt / Resign / Import",   // and the part we deliberately do NOT copy
+]) {
+  check(r.body.includes(key), `UI rule content present: ${key}`);
+}
 // the install-layer AuthID was mis-stated in section 6 until this round; it may only
 // survive as a quoted correction, never as a live claim
 quotedOnly("0x3800000000000010", /0 命中|作废|误记|误写|上一轮/, "no live '0x3800000000000010' AuthID survives");
