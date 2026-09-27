@@ -1,7 +1,8 @@
 // ============================================================
 //  UI 风格 demo 校验 + 截图 + 对比页生成
 //  跑法： node .build/ui_demos_check.mjs
-//  检查对象：工作区根的 ps5-ui-demo-{1..5}-*.html（这些 HTML 本身不入库）
+//  检查对象：工作区根的 ps5-ui-demo-{1,5}-*.html（这些 HTML 本身不入库；
+//  2026-09-27 起 B/C/D 三个候选已归档到工作区根的 _retired-demos/）
 //
 //  为什么这个脚本值得存在：
 //   ① 溢出：transform 移出视口的抽屉会撑开 documentElement 滚动区，
@@ -22,24 +23,19 @@ const ROOT = "C:/Users/songl/Desktop/Web File Manager";
 const OUT = "C:/Users/songl/AppData/Local/Temp/wfm-ui";
 fs.mkdirSync(OUT, { recursive: true });
 
+// ⚠️ 2026-09-27 第五轮：候选收敛到 A 与 E 两条，B/C/D 已归档到工作区根的 _retired-demos/。
+// 删掉它们的同时也删掉对应断言 —— 为已经出局的风格维持检查，成本远大于收益。
 const DEMOS = [
   { key: "demo1", file: "ps5-ui-demo-1-console.html",   name: "风格 A · 主机大厅" },
-  { key: "demo2", file: "ps5-ui-demo-2-workbench.html", name: "风格 B · 双栏工作台" },
-  { key: "demo3", file: "ps5-ui-demo-3-monitor.html",   name: "风格 C · 终端监控台" },
-  { key: "demo4", file: "ps5-ui-demo-4-bento.html",     name: "风格 D · Bento 仪表盘" },
   { key: "demo5", file: "ps5-ui-demo-5-harness.html",   name: "风格 E · Harness 开发者页" },
 ];
 
-// 备用主题方向：demo4 默认亮 → 切暗；demo5 默认暗（忠于站点）→ 切亮。
-// 两个方向都验，避免只测「亮→暗」一半。
-const ALT_THEME = { demo4: "dark", demo5: "light" };
+// 备用主题方向：只剩 demo5 是双主题（默认暗，忠于站点）→ 切亮再验一遍。
+const ALT_THEME = { demo5: "light" };
 
 // 每个 demo 各自的对比度采样点：正文 / 次要文字 / 强调文字 / 有底色的提示条
 const CONTRAST_TARGETS = {
   demo1: [["h1", "大标题"], [".crumb", "次要说明"], [".row .meta", "行内数字"], [".chip", "状态胶囊"], [".banner", "提示条"], [".ipchip .ipv", "本机地址"]],
-  demo2: [["h2", "标题"], [".rootbar", "路径条"], [".li .d", "行内次要"], [".bot", "底部状态条"], [".note.bad", "报错条"], [".ipchip .ipv", "本机地址"]],
-  demo3: [["h2", "面板标题"], [".kv div", "键值（左右混排）"], [".log .m", "日志正文"], [".sub", "辅助文字"], [".tag.q", "标签"], [".ipchip .ipv", "本机地址"]],
-  demo4: [["#sub", "副标题"], [".hero-stats span", "指标说明"], [".tile span", "卡片说明"], [".note.info", "信息条"], [".note.bad", "安全提示条"], [".ipchip .ipv", "本机地址"]],
   // demo5 的采样点刻意跨了「页面底 / 卡片底 / 强调底」三种底色，
   // 因为这套语言全靠近黑底 + 极低对比叠层，底色一变就容易掉出阈值。
   // ⚠️ 六处全部落在**默认视图**内：视图化之后其余视图是 display:none，
@@ -55,6 +51,16 @@ const check = (ok, name) => { console.log((ok ? "  PASS  " : "  FAIL  ") + name)
    "Attempting to serialize unexpected value"（本次真踩过）。 */
 const EXTRA = {
   demo1: [
+    ["三盏状态绿灯与地址都在吸顶导航条里，且状态区不列第三方打包发行版",
+     `() => { const rail = document.querySelector(".toprail"); if (!rail) return false;
+        const r = rail.getBoundingClientRect();
+        const items = [...rail.querySelectorAll(".led, .chip")].filter(e => /kstuff|HTTP|SMB|\\d+\\.\\d+/.test(e.textContent));
+        if (items.length < 4) return false;                        // 三盏灯 + 地址胶囊
+        const t = rail.textContent;
+        if (!/kstuff/.test(t) || !/HTTP/.test(t) || !/SMB/.test(t)) return false;
+        if (/etaHEN/.test(t)) return false;                        // 状态区只列正在跑的服务
+        return items.every(e => { const b = e.getBoundingClientRect();
+          return b.top >= r.top - 1 && b.bottom <= r.bottom + 1; }); }`],
     ["导航改到顶部后触控目标仍 ≥44px（PS5 用触摸板光标）",
      `() => [...document.querySelectorAll(".nav button")].every(b => b.getBoundingClientRect().height >= 44)`],
     ["导航不再产生左侧竖栏（横向空间全让给内容）",
@@ -62,6 +68,15 @@ const EXTRA = {
         return r.width > 900 && r.height <= 80; }`],
   ],
   demo5: [
+    ["状态区只列正在跑的服务，不列第三方打包发行版",
+     `() => { const el = document.querySelector(".topbar"); if (!el) return false;
+        const t = el.textContent;
+        return /kstuff/.test(t) && /HTTP/.test(t) && /SMB/.test(t) && !/etaHEN|未安装/.test(t); }`],
+    ["运行中的进度条有扫光，且静态容量条没有（在跑的才算）",
+     `() => { const p = document.querySelector(".track.pulse i");
+        if (!p || getComputedStyle(p).animationName === "none") return false;
+        const m = document.querySelector(".meter .bar i");
+        return !m || getComputedStyle(m).animationName === "none"; }`],
     ["游戏页有封面网格（≥6 张封面）",
      `() => document.querySelectorAll("#view-library .gcard .cover").length >= 6`],
     ["封面有「抽不到 icon0.png」的回退态（一排卡片里不留空洞）",
@@ -272,7 +287,7 @@ for (const d of DEMOS) {
   });
   const foc = await p.evaluate(() => {
     // 只挑「当前可见」的候选 —— 隐藏视图里的列表聚焦不上，
-    // 会给出 outline=0 shadow=0 的假失败（demo4 默认是总览视图，踩过）。
+    // 会给出 outline=0 shadow=0 的假失败（曾经有个候选默认停在总览视图，踩过）。
     const vis = el => el && el.offsetParent !== null && el.getClientRects().length > 0;
     const sel = [".row[tabindex]", ".li[tabindex]", ".lr[tabindex]", ".tabs button", ".seg button", ".nav button"]
       .map(s => [...document.querySelectorAll(s)].find(vis)).find(Boolean);
@@ -409,7 +424,7 @@ for (const d of DEMOS) {
   check(ps5.ipW > 0 && ps5.ipTop >= 0 && ps5.ipBottom <= 970,
         `PS5 档本机地址在首屏内（top=${ps5.ipTop} bottom=${ps5.ipBottom}）`);
   /* 只有「视图化」页面（带 data-view 导航）才验「导航置顶且单行」。
-     风格 B/C/D 是单页长滚动、压根没有一级导航 —— 硬套只会造出假失败，
+     单页长滚动的候选压根没有一级导航 —— 硬套只会造出假失败，
      而假失败和假通过一样有毒：它会让人开始忽略这一组断言。 */
   if (ps5.n >= 2) {
     check(ps5.n >= 4 && ps5.rows === 1, `PS5 档一级导航单行不折行（${ps5.n} 项 / ${ps5.rows} 行）`);

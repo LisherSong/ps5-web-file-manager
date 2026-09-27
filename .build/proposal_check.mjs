@@ -126,13 +126,35 @@ for (const key of [
   "局域网地址而非回环",        // 127.0.0.1 is useless on the OTHER device
   "::after",                  // hit area is expanded separately from visual height
   "IP:PORT",                  // the accepted shape
-  "209 项",                   // the acceptance count this round reached
+  "99 项",                    // acceptance count (was 209; B/C/D retired in round 11)
 ]) {
   check(r.body.includes(key), `local-address rule present: ${key}`);
 }
 // the install-layer AuthID was mis-stated in section 6 until this round; it may only
 // survive as a quoted correction, never as a live claim
 quotedOnly("0x3800000000000010", /0 命中|作废|误记|误写|上一轮/, "no live '0x3800000000000010' AuthID survives");
+// naming / port / status wording / motion family (2026-09-27 round 11). The project is
+// `PS5 Nexus` on port 2026; the status strip lists ONLY running services (never a
+// third-party bundle's install state -- we depend on the kstuff leaf, not on a packager);
+// and motion is a deliberate FAMILY (running progress bar sweep / breathing LEDs / CTA
+// sheen) rather than scattered decoration. Losing any of these silently re-opens
+// decisions the user already made.
+for (const key of [
+  "PS5 Nexus",                  // the project name replacing "文件与安装中心"
+  "ps5-nexus",                  // repo / ELF name
+  "默认 2026",                  // the new default port (was 8888).
+  // NB: assert on rendered text, not markup — `textContent` strips tags, so a key like
+  // "<code>2026</code>" can never match and would fail forever without anyone noticing.
+  "状态区只列「正在跑的服务」",   // the status-strip rule
+  "打包发行版",                  // ...and what must NOT be listed there
+  "动效要克制",                  // the motion-family rule
+  "var(--pri-fg)",              // inverted-button sheen must use the fg colour
+  "首尾同色",                    // seamless loop for the sweep gradient
+]) {
+  check(r.body.includes(key), `naming/status/motion content present: ${key}`);
+}
+// 8888 may only survive as a quoted "we changed it" note, never as the live default
+quotedOnly("默认 <code>8888</code>", /第六轮|改过来|避开|旧仓/, "no live '8888 is the default port' claim survives");
 console.log("     sections: " + r.h2.join(" | "));
 await page.screenshot({ path: OUT + "/proposal-wide.png", fullPage: true });
 await page.close();
