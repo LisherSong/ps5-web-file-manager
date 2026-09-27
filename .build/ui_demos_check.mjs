@@ -43,8 +43,11 @@ const CONTRAST_TARGETS = {
   demo5: [[".kicker", "大写分区标签"], ["#heroSub", "Hero 副标题"], [".card p", "卡片正文"], [".facts .pill.n", "状态胶囊"], [".note.info", "品牌色提示条"], [".ipchip .ipv", "本机地址"]],
 };
 
-let fails = 0;
-const check = (ok, name) => { console.log((ok ? "  PASS  " : "  FAIL  ") + name); if (!ok) fails++; };
+let fails = 0, total = 0;
+/* ⚠️ total 不能省：文档里「N 项断言」这个数字上一轮是靠人 grep 输出数出来的，结果多报了一项
+   （文档写 99、实际 98 —— HEAD 版脚本复跑同样是 98）。现在每次运行末尾直接打印总数，
+   改文档时照抄，不再靠数。 */
+const check = (ok, name) => { total++; console.log((ok ? "  PASS  " : "  FAIL  ") + name); if (!ok) fails++; };
 /* 逐 demo 的回归钉：只验「这个 demo 该有的东西」，不硬套到别的 demo 上。
    ⚠️ 必须是**字符串形式**的箭头函数：playwright 的 evaluate 只会序列化普通值，
    把函数数组直接当参数传，会在序列化阶段就抛
@@ -72,11 +75,37 @@ const EXTRA = {
      `() => { const el = document.querySelector(".topbar"); if (!el) return false;
         const t = el.textContent;
         return /kstuff/.test(t) && /HTTP/.test(t) && /SMB/.test(t) && !/etaHEN|未安装/.test(t); }`],
-    ["运行中的进度条有扫光，且静态容量条没有（在跑的才算）",
-     `() => { const p = document.querySelector(".track.pulse i");
-        if (!p || getComputedStyle(p).animationName === "none") return false;
-        const m = document.querySelector(".meter .bar i");
-        return !m || getComputedStyle(m).animationName === "none"; }`],
+    ["扫光只给正在运行的条：大卡与「进度」列都在闪，排队行与容量条不闪",
+     `() => {
+        /* ⚠️ 断言必须同时要求「可见」。computed style 在 display:none 的子树上**照样读得到**
+           （animationName 仍是 "sh"），所以老版本只验「动画名不是 none」时，元素根本看不见也会
+           全绿 —— 假通过。.track.pulse 住在 #view-tasks 里，默认（概览）视图下它就是
+           display:none；2026-09-27 用户报「demo5 的进度条闪光效果没有」，根因有两层：
+           ⚠️ 这些检查体是**模板字面量**，里面连注释都不能出现反引号 —— 会把字符串提前截断，
+           报成「Cannot read properties of undefined」。全角引号、角括号都可以，反引号不行。
+           另一层根因是「同一屏、同一个任务，大卡在闪而表格那一列『进度』不闪」。
+           一层是这条断言测不到可见性，另一层是「同一屏同一个任务，大卡在闪、表格『进度』列不闪」。
+           ⚠️ 下面切视图的代码是**纯同步**的（无 await），所以在 Promise.all 里是原子的：
+           其它检查不可能观察到切走/切回的中间态。将来若给它加 await，必须改成串行或加锁。 */
+        const prev = document.querySelector(".view.on");
+        const prevId = prev ? prev.id : null;
+        document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === "view-tasks"));
+        const visEl = el => !!el && el.offsetWidth > 0 && el.offsetHeight > 0;
+        const fillOf = el => (el ? el.querySelector("i") : null);
+        /* 「在闪」= 填充条真的有宽度 + 动画名不是 none。两条都要：
+           只有动画名会让「元素根本看不见」的条也判成在闪（就是这条断言上次假通过的原因）。 */
+        const sweeps = el => { const f = fillOf(el);
+          return visEl(f) && getComputedStyle(f).animationName !== "none"; };
+        /* 「不该闪」量的是轨道可见性 + 填充的动画名 —— 不要要求填充条自己可见：
+           排队/已完成的填充宽度是 0（甚至没有填色），那属于「没在跑」，不是「没渲染」。 */
+        const still = el => visEl(el) && getComputedStyle(fillOf(el)).animationName === "none";
+        const bars = [...document.querySelectorAll(".row .bar")];
+        const live = bars.find(b => b.hasAttribute("data-p"));        // 「进度」列：JS 在推的那条
+        const queued = bars.find(b => !b.hasAttribute("data-p"));     // 排队/已完成：不该闪
+        const ok = sweeps(document.querySelector(".track.pulse")) && sweeps(live) &&
+                   still(queued) && still(document.querySelector(".meter .bar"));
+        document.querySelectorAll(".view").forEach(v => v.classList.toggle("on", v.id === prevId));
+        return ok; }`],
     ["游戏页有封面网格（≥6 张封面）",
      `() => document.querySelectorAll("#view-library .gcard .cover").length >= 6`],
     ["封面有「抽不到 icon0.png」的回退态（一排卡片里不留空洞）",
@@ -211,8 +240,8 @@ for (const d of DEMOS) {
   /* ---------- 本机地址（2026-09-27 加） ----------
      它不是装饰件：插件跑在 PS5 上就是个 HTTP 服务，而这个地址是「用电脑 / 手机
      打开同一个界面」的唯一入口，偏偏 PS5 自己没有 ipconfig —— 界面不给就无处可查。
-     端口来自服务端上报（默认 8888，被占用会顺延），所以这里只要求「像 IP:PORT」，
-     不锁死 8888；锁死了反而会把一个真实的运行时行为挡住。 */
+     端口来自服务端上报（默认 2026，被占用会顺延），所以这里只要求「像 IP:PORT」，
+     不锁死具体端口；锁死了反而会把一个真实的运行时行为挡住。 */
   check(/^\d{1,3}(\.\d{1,3}){3}:\d{2,5}$/.test(base.ip.text),
         `本机地址形如 IP:PORT（${base.ip.text || "缺失"}）`);
   check(!!base.ip.text && !/^(127\.|0\.0\.0\.0)/.test(base.ip.text),
@@ -441,7 +470,8 @@ for (const d of DEMOS) {
 }
 
 await browser.close();
-console.log("\n" + (fails ? fails + " FAILURE(S)" : "ALL CHECKS PASSED"));
+console.log("\n" + (fails ? fails + " FAILURE(S)" : "ALL CHECKS PASSED") +
+            `\n    共 ${total} 项（${total - fails} 通过 / ${fails} 失败）`);
 
 /* ---------- 把截图注入对比页（保持单文件、零外部依赖） ----------
    对比页里用 <img data-shot="demo1"> 作占位；这里填 src。

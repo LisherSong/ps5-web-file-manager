@@ -126,7 +126,7 @@ for (const key of [
   "局域网地址而非回环",        // 127.0.0.1 is useless on the OTHER device
   "::after",                  // hit area is expanded separately from visual height
   "IP:PORT",                  // the accepted shape
-  "99 项",                    // acceptance count (was 209; B/C/D retired in round 11)
+  "98 项",                    // acceptance count (was 209; B/C/D retired in round 11)
 ]) {
   check(r.body.includes(key), `local-address rule present: ${key}`);
 }
