@@ -142,6 +142,58 @@
     </section>
   </div>
 
+  <div id="extractDialog" class="text-editor-overlay" hidden>
+    <section class="text-editor-panel extract-panel" role="dialog" aria-modal="true" aria-labelledby="extractTitle">
+      <h2 id="extractTitle" class="extract-title" data-i18n="extractDialogTitle"></h2>
+      <div class="extract-row">
+        <span class="extract-label" data-i18n="extractArchive"></span>
+        <span id="extractArchiveName" class="extract-archive-name"></span>
+      </div>
+      <label class="extract-field">
+        <span data-i18n="extractDestination"></span>
+        <span class="extract-dest-row">
+          <input id="extractDestInput" class="extract-dest-input" type="text"
+                 spellcheck="false" autocomplete="off" autocapitalize="off">
+          <button id="extractBrowseBtn" type="button" class="secondary" data-i18n="browseFolder"></button>
+        </span>
+      </label>
+      <label class="extract-field">
+        <span data-i18n="extractConflict"></span>
+        <select id="extractConflictSelect" class="extract-select">
+          <option value="fail" data-i18n="extractConflictFail"></option>
+          <option value="overwrite" data-i18n="extractConflictOverwrite"></option>
+          <option value="merge" data-i18n="extractConflictMerge"></option>
+        </select>
+      </label>
+      <label id="extractPasswordField" class="extract-field" hidden>
+        <span data-i18n="extractPasswordLabel"></span>
+        <input id="extractPasswordInput" class="extract-password-input" type="text"
+               spellcheck="false" autocomplete="off" autocapitalize="off">
+      </label>
+      <label class="extract-field extract-large-field">
+        <input id="extractLargeCheck" type="checkbox">
+        <span data-i18n="extractLargeMode"></span>
+      </label>
+      <div class="text-editor-actions">
+        <button id="extractCancelBtn" type="button" class="secondary" data-i18n="cancel"></button>
+        <button id="extractConfirmBtn" type="button" class="primary" data-i18n="extract"></button>
+      </div>
+    </section>
+  </div>
+
+  <div id="folderPickerOverlay" class="text-editor-overlay" hidden>
+    <section class="text-editor-panel folder-picker-panel" role="dialog" aria-modal="true" aria-labelledby="folderPickerTitle">
+      <h2 id="folderPickerTitle" class="folder-picker-title" data-i18n="selectFolder"></h2>
+      <div id="folderPickerPath" class="folder-picker-path"></div>
+      <div id="folderPickerList" class="folder-picker-list"></div>
+      <div class="text-editor-actions">
+        <button id="folderPickerCancelBtn" type="button" class="secondary" data-i18n="cancel"></button>
+        <button id="folderPickerUpBtn" type="button" class="secondary" data-i18n="parent"></button>
+        <button id="folderPickerOkBtn" type="button" class="primary" data-i18n="selectHere"></button>
+      </div>
+    </section>
+  </div>
+
   <div id="permissionOverlay" class="permission-overlay" hidden>
     <section class="permission-panel" role="dialog" aria-modal="true" aria-labelledby="permissionTitle">
       <h2 id="permissionTitle" class="permission-title" data-i18n="permissionsTitle"></h2>

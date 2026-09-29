@@ -151,7 +151,7 @@ CFLAGS += `$(PKG_CONFIG) libmicrohttpd --cflags`
 # ~850 KiB; see docs/SIZE-OPTIMIZATION.md.
 LDFLAGS := -Wl,--gc-sections -Wl,--icf=all
 LDADD  := `$(PKG_CONFIG) libmicrohttpd --libs`
-LDADD  += -lSceIpmi -lSceAppInstUtil -lSceUserService
+LDADD  += -lSceIpmi -lSceAppInstUtil -lSceUserService -lkernel_sys
 LINUX_CFLAGS := -O2 -flto -Wall -Werror -Isrc -Ithird_party/minizip-ng/include -Ithird_party/unrar7 -Ithird_party/7z -DVERSION_TAG=\"$(VERSION_TAG)\" -DTITLE_ID=\"$(TITLE_ID)\"
 LINUX_CFLAGS += `$(HOST_PKG_CONFIG) libmicrohttpd --cflags`
 LINUX_LDADD := `$(HOST_PKG_CONFIG) libmicrohttpd --libs` -pthread

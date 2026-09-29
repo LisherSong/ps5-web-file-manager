@@ -100,6 +100,22 @@ const pkgInfoTitleEl = document.getElementById("pkgInfoTitle");
 const pkgInfoFieldsEl = document.getElementById("pkgInfoFields");
 const pkgInfoCloseBtn = document.getElementById("pkgInfoCloseBtn");
 const pkgInfoInstallBtn = document.getElementById("pkgInfoInstallBtn");
+const extractDialogEl = document.getElementById("extractDialog");
+const extractArchiveNameEl = document.getElementById("extractArchiveName");
+const extractDestInputEl = document.getElementById("extractDestInput");
+const extractBrowseBtnEl = document.getElementById("extractBrowseBtn");
+const extractConflictSelectEl = document.getElementById("extractConflictSelect");
+const extractPasswordFieldEl = document.getElementById("extractPasswordField");
+const extractPasswordInputEl = document.getElementById("extractPasswordInput");
+const extractLargeCheckEl = document.getElementById("extractLargeCheck");
+const extractCancelBtnEl = document.getElementById("extractCancelBtn");
+const extractConfirmBtnEl = document.getElementById("extractConfirmBtn");
+const folderPickerOverlayEl = document.getElementById("folderPickerOverlay");
+const folderPickerPathEl = document.getElementById("folderPickerPath");
+const folderPickerListEl = document.getElementById("folderPickerList");
+const folderPickerCancelBtnEl = document.getElementById("folderPickerCancelBtn");
+const folderPickerUpBtnEl = document.getElementById("folderPickerUpBtn");
+const folderPickerOkBtnEl = document.getElementById("folderPickerOkBtn");
 const permissionOverlayEl = document.getElementById("permissionOverlay");
 const permissionPathEl = document.getElementById("permissionPath");
 const permissionModeEl = document.getElementById("permissionMode");
@@ -1028,24 +1044,136 @@ function actionExtract() {
   if (busy || loadingPath) return;
   const archives = selectedEntries().filter(isExtractableArchive);
   if (archives.length !== 1) return;
-  const item = archives[0];
-  if (!confirm(t("extractConfirm", { name: displayName(item), path: displayPath(cwd) }))) return;
-  const conflict = confirm(t("extractOverwriteAsk")) ? "overwrite" : "fail";
-  const large = shouldPromptLargeMode(item.size) ? promptLargeMode(item.size) : false;
-  // 7z archives can be encrypted (7zAES); ask up front so an unprotected
-  // archive doesn't pay a wasted scan + folder parse.  An empty submission is
-  // fine — the engine returns ZIPX_ERR_PASSWORD and the user retries.
-  // ZIP and RAR are not asked here: their headers are readable either way, so
-  // an empty password costs nothing and a failed attempt is retried through
-  // retryExtractWithPassword() instead of interrupting every extraction.
-  let password = "";
-  if (isSevenZipArchive(item) || isSevenZipSplitVolume(item)) {
-    const asked = prompt(t("extractPasswordAsk"), "");
-    if (asked === null) return;
-    password = asked;
-  }
-  startExtractTask(item.path, cwd, conflict, false, displayName(item), large, password);
+  openExtractDialog(archives[0]);
 }
+
+// Opens the extract dialog. The destination defaults to the current browsing
+// directory, but the user may type any path or pick one with the folder
+// browser. Confirming hands the chosen destination to startExtractTask, so the
+// backend /api/extract dst_dir is whatever the user selected (or the current
+// path when they leave it untouched).
+function openExtractDialog(item) {
+  if (busy || loadingPath) return;
+  extractDialogArchive = item;
+  extractArchiveNameEl.textContent = displayName(item);
+  extractDestInputEl.value = cwd;
+  extractConflictSelectEl.value = "fail";
+  extractPasswordInputEl.value = "";
+  const wantsPassword = isSevenZipArchive(item) || isSevenZipSplitVolume(item);
+  extractPasswordFieldEl.hidden = !wantsPassword;
+  // Large archives default to large-file mode (matching the old "ask + likely
+  // yes" behaviour) but the user can still toggle it off.
+  extractLargeCheckEl.checked = shouldPromptLargeMode(item.size);
+  extractDialogEl.hidden = false;
+  extractDestInputEl.focus();
+  extractDestInputEl.select();
+}
+
+function closeExtractDialog() {
+  extractDialogEl.hidden = true;
+  extractDialogArchive = null;
+}
+
+let extractDialogArchive = null;
+
+extractCancelBtnEl.addEventListener("click", closeExtractDialog);
+extractConfirmBtnEl.addEventListener("click", () => {
+  const item = extractDialogArchive;
+  if (!item) return;
+  const dest = extractDestInputEl.value.trim();
+  if (!dest) {
+    alert(t("extractDestEmpty"));
+    extractDestInputEl.focus();
+    return;
+  }
+  const conflict = extractConflictSelectEl.value;
+  const large = extractLargeCheckEl.checked;
+  const password = extractPasswordFieldEl.hidden ? "" : extractPasswordInputEl.value;
+  closeExtractDialog();
+  startExtractTask(item.path, dest, conflict, false, displayName(item), large, password);
+});
+extractDialogEl.addEventListener("click", event => {
+  if (event.target === extractDialogEl) closeExtractDialog();
+});
+
+// --- Folder picker -------------------------------------------------------
+// A minimal directory browser reused by the extract dialog's "Browse folders"
+// button. It lists subdirectories of the current navigation path and lets the
+// user drill down or step up, then confirms the highlighted directory as the
+// destination.
+let folderPickerOnPick = null;
+let folderPickerCurrent = "/";
+
+function openFolderPicker(initialPath, onPick) {
+  folderPickerOnPick = onPick;
+  folderPickerCurrent = initialPath || cwd;
+  folderPickerOverlayEl.hidden = false;
+  folderPickerRefresh();
+}
+
+async function folderPickerRefresh() {
+  folderPickerPathEl.textContent = folderPickerCurrent;
+  folderPickerListEl.innerHTML = "";
+  const loading = document.createElement("div");
+  loading.className = "folder-picker-empty";
+  loading.textContent = t("ready");
+  folderPickerListEl.appendChild(loading);
+  try {
+    const data = await api("/api/list", { path: folderPickerCurrent });
+    const dirs = (data.entries || [])
+      .filter(e => e.type === "d")
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    folderPickerListEl.innerHTML = "";
+    if (!dirs.length) {
+      const empty = document.createElement("div");
+      empty.className = "folder-picker-empty";
+      empty.textContent = t("empty");
+      folderPickerListEl.appendChild(empty);
+      return;
+    }
+    for (const d of dirs) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "folder-picker-row";
+      row.textContent = d.name + "/";
+      row.addEventListener("click", () => {
+        folderPickerCurrent = d.path;
+        folderPickerRefresh();
+      });
+      folderPickerListEl.appendChild(row);
+    }
+  } catch (err) {
+    folderPickerListEl.innerHTML = "";
+    const msg = document.createElement("div");
+    msg.className = "folder-picker-empty";
+    msg.textContent = err.message;
+    folderPickerListEl.appendChild(msg);
+  }
+}
+
+function closeFolderPicker(picked) {
+  folderPickerOverlayEl.hidden = true;
+  const cb = folderPickerOnPick;
+  folderPickerOnPick = null;
+  if (picked && cb) cb(folderPickerCurrent);
+}
+
+folderPickerCancelBtnEl.addEventListener("click", () => closeFolderPicker(false));
+folderPickerOkBtnEl.addEventListener("click", () => closeFolderPicker(true));
+folderPickerUpBtnEl.addEventListener("click", () => {
+  const trimmed = folderPickerCurrent.replace(/\/+$/, "");
+  const idx = trimmed.lastIndexOf("/");
+  folderPickerCurrent = idx <= 0 ? "/" : trimmed.slice(0, idx) || "/";
+  folderPickerRefresh();
+});
+folderPickerOverlayEl.addEventListener("click", event => {
+  if (event.target === folderPickerOverlayEl) closeFolderPicker(false);
+});
+extractBrowseBtnEl.addEventListener("click", () => {
+  openFolderPicker(extractDestInputEl.value.trim() || cwd, p => {
+    if (p) extractDestInputEl.value = p;
+  });
+});
 
 function openImagePreview(item) {
   if (busy) return;

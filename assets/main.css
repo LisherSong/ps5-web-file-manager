@@ -959,6 +959,145 @@ input[type="checkbox"] {
   word-break: break-all;
 }
 
+/* --- Extract dialog + folder picker --- */
+.extract-panel {
+  width: 600px;
+  max-width: calc(100vw - 48px);
+}
+
+.extract-title {
+  margin: 0 0 16px;
+  color: #edf0f2;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.extract-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-size: 18px;
+}
+
+.extract-label {
+  flex: 0 0 auto;
+  color: #8f9ba6;
+}
+
+.extract-archive-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: #d9e0e6;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.extract-field {
+  display: block;
+  margin: 12px 0;
+  font-size: 18px;
+}
+
+.extract-field > span:first-child,
+.extract-large-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.extract-field > span[data-i18n] {
+  color: #8f9ba6;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.extract-dest-row {
+  display: flex;
+  gap: 8px;
+}
+
+.extract-dest-input,
+.extract-password-input,
+.extract-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 12px;
+  font-size: 18px;
+  font-family: inherit;
+  color: #d9e0e6;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+}
+
+.extract-dest-input:focus,
+.extract-password-input:focus,
+.extract-select:focus {
+  outline: none;
+  border-color: #6fb1ff;
+}
+
+.extract-large-field {
+  gap: 10px;
+  cursor: pointer;
+}
+
+.folder-picker-panel {
+  width: 600px;
+  max-width: calc(100vw - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.folder-picker-title {
+  margin: 0 0 14px;
+  color: #edf0f2;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.folder-picker-path {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 16px;
+  color: #aab4be;
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+
+.folder-picker-list {
+  max-height: calc(100vh - 320px);
+  min-height: 120px;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+.folder-picker-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 18px;
+  color: #d9e0e6;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+.folder-picker-row:hover,
+.folder-picker-row:focus {
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+.folder-picker-empty {
+  padding: 14px 12px;
+  color: #8f9ba6;
+  font-size: 17px;
+}
+
 .permission-overlay {
   position: fixed;
   top: 0;
